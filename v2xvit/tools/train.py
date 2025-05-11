@@ -84,7 +84,7 @@ def main():
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         saved_path = train_utils.setup_train(hypes)
-
+    print("saved_path is %s", saved_path)
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.to(device)
@@ -136,7 +136,6 @@ def main():
             if len(set(record_len_list)) != 1:
                 record_len_list = []
                 continue
-            print(record_len_list)
             record_len_list = []
             # the model will be evaluation mode during validation
             model.train()
