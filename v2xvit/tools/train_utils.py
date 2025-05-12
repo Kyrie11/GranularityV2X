@@ -82,36 +82,71 @@ def load_saved_model(saved_path, model, epoch=None):
 
 
 def setup_train(hypes):
+
     """
+
     Create folder for saved model based on current timestep and model name
 
+
+
     Parameters
+
     ----------
+
     hypes: dict
+
         Config yaml dictionary for training:
+
     """
+
     model_name = hypes['name']
+
     current_time = datetime.now()
 
+
+
     folder_name = current_time.strftime("_%Y_%m_%d_%H_%M_%S")
+
     folder_name = model_name + folder_name
 
+<<<<<<< HEAD
+
+
+    # current_path = os.path.dirname(__file__)
+
+    # current_path = os.path.join(current_path, '../logs')
+
+    current_path = "/home/wang/code/GranularityV2X/logs"
+
+
+=======
     # current_path = os.path.dirname(__file__)
     # current_path = os.path.join(current_path, '../logs')
     current_path = "/home/wang/code/GranularityV2X/logs"
+>>>>>>> ffe80f532597ef0fcd10407ac54a5613e4337fca
 
     full_path = os.path.join(current_path, folder_name)
     print("saved models in %s", full_path)
 
+    print("saved models in %s", full_path)
+
+
+
     if not os.path.exists(full_path):
+
         os.makedirs(full_path)
+
         # save the yaml file
+
         save_name = os.path.join(full_path, 'config.yaml')
+
         with open(save_name, 'w') as outfile:
+
             yaml.dump(hypes, outfile)
 
-    return full_path
 
+
+    return full_path
 
 def create_model(hypes):
     """
