@@ -144,9 +144,9 @@ class PointPillarHow2comm(nn.Module):
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
-        print(spatial_features.shape)
-        print(raw_voxel_coords_list[0].shape)
-        print(raw_voxel_features_list[0].shape)
+        # print(spatial_features.shape)
+        # print(raw_voxel_coords_list[0].shape)
+        # print(raw_voxel_features_list[0].shape)
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
         psm_single = self.cls_head(spatial_features_2d)
