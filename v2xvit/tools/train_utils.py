@@ -8,6 +8,7 @@ from datetime import datetime
 import torch
 import torch.optim as optim
 
+
 def findLastCheckpoint(save_dir):
     file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
     if file_list:
@@ -49,10 +50,10 @@ def load_saved_model(saved_path, model, epoch=None):
             initial_epoch = findLastCheckpoint(saved_path)
         else:
             initial_epoch = int(epoch)
-            
+
         if initial_epoch > 0:
             print('resuming by loading epoch %d' % initial_epoch)
-        
+
         state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch), map_location="cuda:0")
         state_dict = {}
         # convert data_parallal to model
@@ -61,14 +62,14 @@ def load_saved_model(saved_path, model, epoch=None):
                 state_dict[k[7:]] = state_dict_[k]
             else:
                 state_dict[k] = state_dict_[k]
-        
+
         model_state_dict = model.state_dict()
 
         for k in state_dict:
             if k in model_state_dict:
                 if state_dict[k].shape != model_state_dict[k].shape:
                     print('Skip loading parameter {}, required shape{}, ' \
-                        'loaded shape{}.'.format(
+                          'loaded shape{}.'.format(
                         k, model_state_dict[k].shape, state_dict[k].shape))
                     state_dict[k] = model_state_dict[k]
             else:
@@ -82,71 +83,34 @@ def load_saved_model(saved_path, model, epoch=None):
 
 
 def setup_train(hypes):
-
     """
-
     Create folder for saved model based on current timestep and model name
 
-
-
     Parameters
-
     ----------
-
     hypes: dict
-
         Config yaml dictionary for training:
-
     """
-
     model_name = hypes['name']
-
     current_time = datetime.now()
 
-
-
     folder_name = current_time.strftime("_%Y_%m_%d_%H_%M_%S")
-
     folder_name = model_name + folder_name
 
-<<<<<<< HEAD
-
-
-    # current_path = os.path.dirname(__file__)
-
-    # current_path = os.path.join(current_path, '../logs')
-
-    current_path = "/home/wang/code/GranularityV2X/logs"
-
-
-=======
-    # current_path = os.path.dirname(__file__)
-    # current_path = os.path.join(current_path, '../logs')
-    current_path = "/home/wang/code/GranularityV2X/logs"
->>>>>>> ffe80f532597ef0fcd10407ac54a5613e4337fca
-
-    full_path = os.path.join(current_path, folder_name)
-    print("saved models in %s", full_path)
-
-    print("saved models in %s", full_path)
-
-
+    current_path = os.path.dirname(__file__)
+    current_path = os.path.join(current_path, '../logs')
+    full_path = os.path.join("/home/wang/code/Granularity/logs/", folder_name)
+    # full_path = os.path.join(current_path, folder_name)
 
     if not os.path.exists(full_path):
-
         os.makedirs(full_path)
-
         # save the yaml file
-
         save_name = os.path.join(full_path, 'config.yaml')
-
         with open(save_name, 'w') as outfile:
-
             yaml.dump(hypes, outfile)
 
-
-
     return full_path
+
 
 def create_model(hypes):
     """
@@ -259,7 +223,6 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None):
     """
     lr_schedule_config = hypes['lr_scheduler']
     last_epoch = init_epoch if init_epoch is not None else 0
-    
 
     if lr_schedule_config['core_method'] == 'step':
         from torch.optim.lr_scheduler import StepLR
