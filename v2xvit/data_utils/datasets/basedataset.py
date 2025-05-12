@@ -116,7 +116,7 @@ class BaseDataset(Dataset):
             assert len(cav_list) > 0
 
             # roadside unit data's id is always negative, so here we want to
-            # make sure they will be in th6e end of the list as they shouldn't
+            # make sure they will be in the end of the list as they shouldn't
             # be ego vehicle.
             if int(cav_list[0]) < 0:
                 cav_list = cav_list[1:] + [cav_list[0]]

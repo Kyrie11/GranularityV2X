@@ -109,6 +109,7 @@ def setup_train(hypes):
 
     folder_name = model_name + folder_name
 
+<<<<<<< HEAD
 
 
     # current_path = os.path.dirname(__file__)
@@ -118,8 +119,14 @@ def setup_train(hypes):
     current_path = "/home/wang/code/GranularityV2X/logs"
 
 
+=======
+    # current_path = os.path.dirname(__file__)
+    # current_path = os.path.join(current_path, '../logs')
+    current_path = "/home/wang/code/GranularityV2X/logs"
+>>>>>>> ffe80f532597ef0fcd10407ac54a5613e4337fca
 
     full_path = os.path.join(current_path, folder_name)
+    print("saved models in %s", full_path)
 
     print("saved models in %s", full_path)
 

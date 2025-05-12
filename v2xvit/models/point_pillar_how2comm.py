@@ -99,17 +99,12 @@ class PointPillarHow2comm(nn.Module):
         raw_voxel_coords_list = []
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
-            voxel_features = data_dict['processed_lidar']['voxel_features']
-            raw_voxel_features_list.append(voxel_features.clone())
-            voxel_coords = data_dict['processed_lidar']['voxel_coords']
-            raw_voxel_coords_list.append(voxel_coords.clone())
+            voxel_features = data_dict['processed_lidar']['voxel_features'].clone()
+            raw_voxel_features_list.append(voxel_features)
+            voxel_coords = data_dict['processed_lidar']['voxel_coords'].clone()
+            raw_voxel_coords_list.append(voxel_coords)
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
-
-            # raw_points = data_dict['origin_lidar']
-            raw_points = {'features': voxel_features,
-                          'coords': voxel_coords}
-            raw_points_list.append(raw_points)
 
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
@@ -125,7 +120,6 @@ class PointPillarHow2comm(nn.Module):
             # N, C, H', W'
             spatial_features_2d = batch_dict['spatial_features_2d']
 
-            # downsample feature to reduce memory
             if self.shrink_flag:
                 spatial_features_2d = self.shrink_conv(spatial_features_2d)
             # compressor
@@ -136,22 +130,23 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
-            batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
+            batch_dict_list.append(batch_dict)
             feature_list.append(spatial_features)
             feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
             regroup_feature_list.append(self.regroup(
-                spatial_features_2d, record_len))  
+                spatial_features_2d, record_len))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
 
-        pairwise_t_matrix = matrix_list[0].clone().detach()  
-        
-
+        pairwise_t_matrix = matrix_list[0].clone().detach()
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
+        print(spatial_features.shape)
+        print(raw_voxel_coords_list[0].shape)
+        print(raw_voxel_features_list[0].shape)
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
         psm_single = self.cls_head(spatial_features_2d)
