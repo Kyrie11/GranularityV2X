@@ -99,6 +99,7 @@ class PointPillarHow2comm(nn.Module):
         raw_voxel_coords_list = []
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
+            print(data_dict.keys())
             voxel_features = data_dict['processed_lidar']['voxel_features'].clone()
             raw_voxel_features_list.append(voxel_features)
             voxel_coords = data_dict['processed_lidar']['voxel_coords'].clone()
@@ -143,6 +144,8 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
         spatial_features = feature_list[0]
+        print(spatial_features.shape)
+
         spatial_features_2d = feature_2d_list[0]
         # print(spatial_features.shape)
         # print(raw_voxel_coords_list[0].shape)
