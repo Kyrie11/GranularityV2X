@@ -134,6 +134,8 @@ class Communication(nn.Module):
             agent_feature = feat_list[bs]
             voxel_features = raw_voxel_list[bs]
             voxel_coords = raw_coord_list[bs]
+            print("voxel_features尺寸：", voxel_features.shape)
+            print("voxel_coords尺寸：", voxel_coords.shape)
             cav_num, C, H, W = agent_feature.shape
             print("cav num 是", cav_num)
             if cav_num == 1:
