@@ -97,9 +97,9 @@ class PointPillarHow2comm(nn.Module):
         raw_points_list = []
         raw_voxel_features_list = []
         raw_voxel_coords_list = []
+        # print("帧数是", len(data_dict_list))
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
-            print(data_dict.keys())
             voxel_features = data_dict['processed_lidar']['voxel_features'].clone()
             raw_voxel_features_list.append(voxel_features)
             voxel_coords = data_dict['processed_lidar']['voxel_coords'].clone()
@@ -144,7 +144,7 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
         spatial_features = feature_list[0]
-        print(spatial_features.shape)
+
 
         spatial_features_2d = feature_2d_list[0]
         # print(spatial_features.shape)
@@ -152,8 +152,10 @@ class PointPillarHow2comm(nn.Module):
         # print(raw_voxel_features_list[0].shape)
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
+        self.regroup(raw_voxel_coords_list[0], record_len)
         psm_single = self.cls_head(spatial_features_2d)
-
+        print("spatial features 尺寸：", spatial_features.shape)
+        print("record len尺寸：", record_len)
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(spatial_features, psm_single, record_len,pairwise_t_matrix,self.backbone,[self.shrink_conv, self.cls_head, self.reg_head], raw_voxels=raw_voxel_features_list[0], raw_coords=raw_voxel_coords_list[0])
         elif self.delay > 0:

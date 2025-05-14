@@ -130,11 +130,12 @@ class Communication(nn.Module):
         comm_rate_list = []  
         sparse_mask_list = []  
         total_loss = torch.zeros(1).to(feat_list[0].device)
-        for bs in range(len(feat_list)): #按场景分割的feat
+        for bs in range(len(feat_list)): #按batch分割的feat
             agent_feature = feat_list[bs]
             voxel_features = raw_voxel_list[bs]
             voxel_coords = raw_coord_list[bs]
             cav_num, C, H, W = agent_feature.shape
+            print("cav num 是", cav_num)
             if cav_num == 1:
                 send_feats.append(agent_feature)
                 ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
@@ -197,14 +198,14 @@ class Communication(nn.Module):
                     ones_fill = torch.ones(1, K, dtype=communication_maps.dtype, device=communication_maps.device)
                     sparse_mask = torch.scatter(communication_mask, -1, indices, ones_fill).reshape(1, C, H, W)
 
-                sparse_points_mask = torch.zeros((H, W), dtype=torch.bool, device=sparse_mask.device)
+                sparse_points_mask = torch.zeros((H, W)).bool()
                 sparse_feature_mask = torch.zeros_like(sparse_mask).bool()
                 if self.replace_mode == "random":
                     replace_mask = torch.rand_like(sparse_mask)
                     replace_mask = replace_mask.mean(dim=0, keepdim=True)
                     replace_mask = replace_mask < self.replace_ratio
-                    sparse_points_mask = sparse_mask & replace_mask
-                    sparse_feature_mask = sparse_mask & (~replace_mask)
+                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 elif self.replace_mode == "topk":
                     replace_mask = torch.zeros((1, H, W), dtype=torch.bool, device=sparse_mask.device)
@@ -213,15 +214,15 @@ class Communication(nn.Module):
                     k = int(sparse_mask.sum() * self.replace_ratio)
                     _, topk_indices = torch.topk(confidence.view(-1), k)
                     replace_mask.view(-1)[topk_indices] = True
-                    sparse_points_mask = sparse_mask & replace_mask
-                    sparse_feature_mask = sparse_mask & (~replace_mask)
+                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 elif self.replace_mode == "attention":
                     attention_weights = agent_channel_attention[i+1] * agent_spatial_attention[i+1]
                     attention_weights_mean = attention_weights.mean(dim=0, keepdim=True)  # [1, H, W]
                     replace_mask = attention_weights_mean > self.replace_ratio
-                    sparse_points_mask = sparse_mask & replace_mask
-                    sparse_feature_mask = sparse_mask & (~replace_mask)
+                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 agent_coords = voxel_coords[i+1]
                 agent_voxels = voxel_features[i+1]

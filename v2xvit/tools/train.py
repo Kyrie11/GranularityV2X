@@ -14,7 +14,9 @@ import v2xvit.hypes_yaml.yaml_utils as yaml_utils
 from v2xvit.tools import train_utils,infrence_utils
 from v2xvit.data_utils.datasets import build_dataset
 from v2xvit.tools import multi_gpu_utils
-
+import gc
+gc.collect()
+torch.cuda.empty_cache()
 
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
@@ -29,6 +31,7 @@ def train_parser():
     return opt
 
 def main():
+
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
     multi_gpu_utils.init_distributed_mode(opt)
