@@ -137,6 +137,7 @@ class Communication(nn.Module):
             selected_batch_voxels = []
             selected_batch_coords = []
             agent_feature = feat_list[bs]
+            device = agent_feature.device
             cav_num, C, H, W = agent_feature.shape
             batch_mask = (raw_coords[:, 0] >= batch_start) & \
                          (raw_coords[:, 0] < batch_start + cav_num)
@@ -169,8 +170,8 @@ class Communication(nn.Module):
             for i in range(cav_num - 1):
                 global_agent_id = batch_start + i +1
                 agent_mask = (batch_voxel_coords[:, 0] == global_agent_id)
-                agent_coords = batch_voxel_coords[agent_mask]
-                agent_features = batch_voxel_features[agent_mask]
+                agent_coords = batch_voxel_coords[agent_mask].to(device)
+                agent_features = batch_voxel_features[agent_mask].to(device)
                 if self.request_flag:
                     channel_coefficient = self.channel_fusion(torch.cat(
                         [ego_channel_request, agent_channel_attention[i+1, ].unsqueeze(0)], dim=1))  
@@ -211,7 +212,7 @@ class Communication(nn.Module):
                 sparse_feature_mask = torch.zeros_like(sparse_mask).bool()
                 if self.replace_mode == "random":
                     # 生成与sparse_mask同维度的随机掩码
-                    replace_mask = torch.rand_like(sparse_mask)  # [C,H,W]
+                    replace_mask = torch.rand_like(sparse_mask, device=device)  # [C,H,W]
                     replace_mask = replace_mask < self.replace_ratio
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
@@ -221,7 +222,7 @@ class Communication(nn.Module):
                     C, H, W = sparse_mask.shape[-3:]
                     k_per_channel = int(H * W * self.replace_ratio)
 
-                    sparse_points_mask = torch.zeros_like(sparse_mask).bool()
+                    sparse_points_mask = torch.zeros_like(sparse_mask, device=device).bool()
                     for c in range(C):
                         # 获取当前通道的置信度
                         channel_confidence = confidence_map_list[bs][i + 1][c]  # [H,W]
@@ -237,7 +238,7 @@ class Communication(nn.Module):
 
                 elif self.replace_mode == "attention":
                     # 保持通道维度
-                    attention_weights = agent_channel_attention[i + 1] * agent_spatial_attention[i + 1]  # [C,H,W]
+                    attention_weights = agent_channel_attention[i + 1] * agent_spatial_attention[i + 1].to(device) # [C,H,W]
                     replace_mask = attention_weights > self.replace_ratio  # [C,H,W]
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
@@ -246,7 +247,7 @@ class Communication(nn.Module):
                 _,C, H, W = sparse_points_mask.shape
                 x_idx = agent_coords[:, 3].long()# [K]
                 y_idx = agent_coords[:, 2].long()  # [K]
-                c_idx = torch.arange(C, device=agent_coords.device).view(-1, 1, 1).expand(-1, H, W)  # 通道索引 [C,H,W]
+                c_idx = torch.arange(C, device=device).view(-1, 1, 1).expand(-1, H, W)  # 通道索引 [C,H,W]
                 # 创建3D体素掩码
                 voxel_c_mask = c_idx[:, y_idx, x_idx] # [C,K]
                 voxel_yx_mask = sparse_points_mask[:, :, y_idx, x_idx]  # [C,K]
