@@ -15,6 +15,64 @@ from v2xvit.models.fuse_modules.stcformer import STCFormer
 from v2xvit.models.sub_modules.pillar_vfe import PillarVFE
 from v2xvit.models.sub_modules.point_pillar_scatter import PointPillarScatter
 
+
+class VoxelProjector(nn.Module):
+    def __init__(self, in_channels=32, bev_channels=256, voxel_size=0.4):
+        super().__init__()
+        self.voxel_encoder = nn.Sequential(
+            nn.Linear(in_channels, 64),
+            nn.ReLU(),
+            nn.Linear(64, bev_channels)
+        )
+        self.bev_fusion = nn.Sequential(
+            nn.Conv2d(bev_channels * 2, bev_channels, 3, padding=1),
+            nn.BatchNorm2d(bev_channels),
+            nn.ReLU()
+        )
+        self.voxel_size = voxel_size
+
+    def forward(self, bev_feat, sparse_voxels, sparse_coords, t_matrix):
+        """
+        :param bev_feat: [B, C, H, W] 原始BEV特征
+        :param sparse_voxels: list[Tensor] 各agent的稀疏体素特征
+        :param sparse_coords: list[Tensor] 各agent的体素坐标
+        :param t_matrix: [B, L, L, 4,4] 坐标变换矩阵
+        """
+        batch_projected = []
+        for b in range(bev_feat.size(0)):
+            # 当前batch的变换矩阵
+            t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
+
+            # 初始化投影特征
+            C, H, W = bev_feat.shape[1:]
+            projected = torch.zeros_like(bev_feat[b])
+
+            # 遍历每个协作agent（从索引1开始）
+            for agent_id in range(1, len(sparse_voxels[b])):
+                # 坐标转换
+                homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1)
+                ego_coords = (t_matrix_batch[0, agent_id] @ homog_coords.T).T[:, :3]
+
+                # 量化到BEV网格
+                x_idx = (ego_coords[:, 0] / self.voxel_size).long().clamp(0, W - 1)
+                y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
+
+                # 特征编码
+                encoded = self.voxel_encoder(sparse_voxels[b][agent_id])
+
+                # 累积到投影特征
+                for x, y, feat in zip(x_idx, y_idx, encoded):
+                    projected[:, y, x] += feat
+
+            # 与原始特征融合
+            fused = self.bev_fusion(torch.cat([
+                bev_feat[b].unsqueeze(0),
+                projected.unsqueeze(0)
+            ], dim=1))
+            batch_projected.append(fused)
+
+        return torch.cat(batch_projected)
+
 class How2comm(nn.Module):
     def __init__(self, args, args_pre):
         super(How2comm, self).__init__()
@@ -53,6 +111,12 @@ class How2comm(nn.Module):
                                     voxel_size=args_pre['voxel_size'],
                                     point_cloud_range=args_pre['lidar_range'])
         self.scatter = PointPillarScatter(args_pre['point_pillar_scatter'])
+
+        self.voxel_projector = VoxelProjector(
+            in_channels=32,
+            bev_channels=64 if 'num_filters' not in args else args['num_filters'][0],
+            voxel_size=args['voxel_size'][0]
+        )
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
@@ -133,67 +197,21 @@ class How2comm(nn.Module):
                         if self.communication_flag:
                             sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
                             x, record_len,history_list,temp_psm_list, raw_voxels, raw_coords)
-                            x_comm = F.interpolate(sparse_feats, scale_factor=1, mode='bilinear', align_corners=False)
-                            x_comm = self.channel_fuse(x_comm)
-                            his_comm = F.interpolate(sparse_history, scale_factor=1, mode='bilinear', align_corners=False)
-                            his_comm = self.channel_fuse(his_comm)
+                            # 体素投影融合
+                            voxel_bev = self.voxel_projector(
+                                x,
+                                sparse_voxels,
+                                sparse_coords,
+                                pairwise_t_matrix
+                            )
+                            # 多模态特征融合
+                            x = torch.cat([x, voxel_bev], dim=1)
+                            x = self.channel_fuse(x)
 
-                            # ----- 并行融合实现 -----
-                            #1. 计算Ego agent 原始 BEV特征
-                            raw_voxel_list = self.regroup(raw_voxels, record_len)
-                            raw_coord_list = self.regroup(raw_coords, record_len)
-                            ego_bev_list = []
-                            for b in range(len(raw_voxel_list)):
-                                #取每一个batch中第一个agent(ego)，合并其体素信息
-                                ego_voxels = raw_voxel_list[b][0].unsqueeze(0)  # [1, Np, 4]
-                                ego_coords = raw_coord_list[b][0]  # [N_voxels, 4]
-                                # 假设每个 voxel 点数相同或全为最大值
-                                num_points = torch.full((ego_voxels.shape[0],), ego_voxels.shape[1],
-                                                        dtype=torch.int32).to(ego_voxels.device)
-                                batch_dict = {
-                                    'voxel_features': ego_voxels,
-                                    'voxel_coords': ego_coords,
-                                    'voxel_num_points': num_points
-                                }
-                                pillar_feat = self.pillar_vfe(batch_dict)['pillar_features']  # [N_voxels, C']
-                                batch_dict['pillar_features'] = pillar_feat
-                                bev_ego = self.scatter(batch_dict)['spatial_features']        # [1, C', H, W]
-                                ego_bev_list.append(bev_ego)
-                            ego_bev = torch.cat(ego_bev_list, dim=0)                              # [B, C', H, W]
-
-                            #2. 计算稀疏体素BEV特征
-                            sparse_voxel_list = self.regroup(sparse_voxels, record_len)
-                            sparse_coord_list = self.regroup(sparse_coords, record_len)
-                            sparse_bev_list = []
-                            for b in range(len(sparse_voxel_list)):
-                                voxels_b = sparse_voxel_list[b]  # [N_sparse_voxels, Np, 4] (连接了各 agent)
-                                coords_b = sparse_coord_list[b]  # [N_sparse_voxels, 4]
-                                if voxels_b.numel() == 0:  # 防止无稀疏点云情况
-                                    # 创建全零 BEV
-                                    batch_size = ego_bev.shape[2]  # H
-                                    bev_zeros = torch.zeros_like(ego_bev[b:b + 1])
-                                    sparse_bev_list.append(bev_zeros)
-                                    continue
-                                num_pts2 = torch.full((voxels_b.shape[0],), voxels_b.shape[1], dtype=torch.int32).to(
-                                    voxels_b.device)
-                                batch_dict2 = {
-                                    'voxel_features': voxels_b,
-                                    'voxel_coords': coords_b,
-                                    'voxel_num_points': num_pts2
-                                }
-                                pillar_feat2 = self.pillar_vfe(batch_dict2)['pillar_features']
-                                batch_dict2['pillar_features'] = pillar_feat2
-                                bev_sparse = self.scatter(batch_dict2)['spatial_features']  # [1, C', H, W]
-                                sparse_bev_list.append(bev_sparse)
-                            sparse_bev = torch.cat(sparse_bev_list, dim=0) # [B, C', H, W]
-
-                            #3. 特征融合(采用加权求和)
-                            #假设x_comm和ego_bev、sparse_bev具有相同通道数
-                            fusion1 = ego_bev * 0.5 + x_comm * 0.5
-                            fusion2 = ego_bev * 0.5 + sparse_bev * 0.5
-                            #合并两个融合结果
-                            x = fusion1 + fusion2
-                            his = his_comm
+                            x = F.interpolate(sparse_feats, scale_factor=1, mode='bilinear', align_corners=False)
+                            x = self.channel_fuse(x)
+                            his = F.interpolate(sparse_history, scale_factor=1, mode='bilinear', align_corners=False)
+                            his = self.channel_fuse(his)
                         else:
                             communication_rates = torch.tensor(0).to(x.device)
                             commu_loss = torch.zeros(1).to(x.device)

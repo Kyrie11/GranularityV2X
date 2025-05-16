@@ -1,3 +1,5 @@
+from asyncio import set_event_loop
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -123,21 +125,24 @@ class Communication(nn.Module):
         self.gaussian_filter.weight.data = gaussian_kernel
         self.gaussian_filter.bias.data.zero_()
 
-    def forward(self, feat_list, confidence_map_list=None, raw_voxel_list=None, raw_coord_list=None):
+    def forward(self, feat_list, pairwise_t_matrix, confidence_map_list=None, raw_voxels=None, raw_coords=None):
         send_feats = []
-        send_voxels = []
-        send_coords = []
+        selected_voxels = []
+        selected_coords = []
         comm_rate_list = []  
         sparse_mask_list = []  
         total_loss = torch.zeros(1).to(feat_list[0].device)
+        batch_start = 0
         for bs in range(len(feat_list)): #按batch分割的feat
+            selected_batch_voxels = []
+            selected_batch_coords = []
             agent_feature = feat_list[bs]
-            voxel_features = raw_voxel_list[bs]
-            voxel_coords = raw_coord_list[bs]
-            print("voxel_features尺寸：", voxel_features.shape)
-            print("voxel_coords尺寸：", voxel_coords.shape)
             cav_num, C, H, W = agent_feature.shape
-            print("cav num 是", cav_num)
+            batch_mask = (raw_coords[:, 0] >= batch_start) & \
+                         (raw_coords[:, 0] < batch_start + cav_num)
+            batch_voxel_coords = raw_coords[batch_mask]
+            batch_voxel_features = raw_voxels[batch_mask]
+
             if cav_num == 1:
                 send_feats.append(agent_feature)
                 ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
@@ -145,14 +150,12 @@ class Communication(nn.Module):
                 continue
                 
             collaborator_feature = torch.tensor([]).to(agent_feature.device)
-            collaborator_voxels = torch.tensor([]).to(agent_feature.device)
-            collaborator_coords = torch.tensor([]).to(agent_feature.device)
             sparse_batch_mask = torch.tensor([]).to(agent_feature.device)
 
             agent_channel_attention = self.channel_request(
                 agent_feature) 
             agent_spatial_attention = self.spatial_request(
-                agent_feature) 
+                agent_feature)
             agent_activation = torch.mean(agent_feature, dim=1, keepdims=True).sigmoid()  
             agent_activation = self.gaussian_filter(agent_activation)
 
@@ -164,6 +167,10 @@ class Communication(nn.Module):
 
 
             for i in range(cav_num - 1):
+                global_agent_id = batch_start + i +1
+                agent_mask = (batch_voxel_coords[:, 0] == global_agent_id)
+                agent_coords = batch_voxel_coords[agent_mask]
+                agent_features = batch_voxel_features[agent_mask]
                 if self.request_flag:
                     channel_coefficient = self.channel_fusion(torch.cat(
                         [ego_channel_request, agent_channel_attention[i+1, ].unsqueeze(0)], dim=1))  
@@ -226,38 +233,13 @@ class Communication(nn.Module):
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
-                agent_coords = voxel_coords[i+1]
-                agent_voxels = voxel_features[i+1]
-                selected_coords = []
-                selected_voxels = []
-                ys, xs = torch.nonzero(sparse_points_mask, as_tuple=True)
-                for y, x in zip(ys.tolist(), xs.tolist()):
-                    matches = (agent_coords[:,2] == y) & (agent_coords[:,3] == x)
-                    idxs = matches.nonzero(as_tuple=False).squeeze(1)
-                    if idxs.numel() > 0:
-                        selected_voxels.append(agent_voxels[idxs])
-                        selected_coords.append(agent_coords[idxs])
-                if selected_voxels:
-                    sel_vox = torch.cat(selected_voxels, dim=0)
-                    sel_coo = torch.cat(selected_coords, dim=0)
-                else:
-                    sel_vox = torch.empty((0, agent_voxels.shape[1]), device=agent_voxels.device)
-                    sel_coo = torch.empty((0, agent_coords.shape[1]), device=agent_coords.device)
-
-                # if sparse_points_mask.any():
-                #     # 将点云映射到BEV网格
-                #     bev_H, bev_W = agent_feature.shape[2:]
-                #     # 将体素坐标转换为BEV网格索引
-                #     x_idx = (voxel_coords[i+1][:, 3] / self.discrete_ratio).long()
-                #     y_idx = (voxel_coords[i+1][:, 2] / self.discrete_ratio).long()
-                #     # 筛选在稀疏点云掩码内的体素
-                #     bev_indices = y_idx * bev_W + x_idx
-                #     point_voxel_mask = sparse_points_mask.view(-1)[bev_indices]
-                #     selected_points = voxel_features[i+1][point_voxel_mask][:, :5] #保留x,y,z,curvature,intensity
-                #     selected_coords = voxel_coords[i+1][point_voxel_mask]
-                #     sparse_point = {'coords': selected_coords,
-                #      'features': selected_points}
-                #     collaborator_points.append(sparse_point)
+                x_idx = agent_coords[:, 3].long()
+                y_idx = agent_coords[:, 2].long()
+                voxel_mask = sparse_points_mask[y_idx, x_idx]
+                selected_agent_voxels = agent_features[voxel_mask]
+                selected_agent_coords = agent_coords[voxel_mask]
+                selected_batch_voxels.append(selected_agent_voxels)
+                selected_batch_coords.append(selected_agent_coords)
 
                 feature_rate = sparse_feature_mask.sum() / (C * H * W)
                 voxel_rate = sparse_points_mask.sum() / (H * W)
@@ -266,23 +248,16 @@ class Communication(nn.Module):
 
                 collaborator_feature = torch.cat(
                     [collaborator_feature, agent_feature[i+1, ].unsqueeze(0)*sparse_feature_mask], dim=0)
-                collaborator_voxels = torch.cat(
-                    [collaborator_voxels, sel_vox], dim=0)
-                collaborator_coords = torch.cat(
-                    [collaborator_coords, sel_coo], dim=0)
                 sparse_batch_mask = torch.cat(
                     [sparse_batch_mask, sparse_feature_mask], dim=0)
+
+            selected_voxels.append(selected_batch_voxels)
+            selected_coords.append(selected_batch_coords)
 
             org_feature = agent_feature.clone()
             sparse_feature = torch.cat(
                 [agent_feature[:1], collaborator_feature], dim=0)
             send_feats.append(sparse_feature)
-            sparse_voxels = torch.cat(
-                [voxel_features[0], collaborator_voxels], dim=0)
-            send_voxels.append(sparse_voxels)
-            sparse_coords = torch.cat(
-                [voxel_coords[0], collaborator_coords], dim=0)
-            send_coords.append(sparse_coords)
             ego_mask = torch.ones_like(agent_feature[:1]).to(
                 agent_feature[:1].device)
             sparse_batch_mask = torch.cat(
@@ -299,21 +274,38 @@ class Communication(nn.Module):
             # recon_loss = F.mse_loss(collaborator_points[:, :3], org_point_cloud[:, :3]) #增加重建损失
             # total_loss += loss + 0.5*recon_loss
             total_loss += loss
+
+            batch_start += cav_num
         mean_rate = torch.stack(comm_rate_list).mean()
         sparse_mask = torch.cat(sparse_mask_list, dim=0)
 
 
-        return send_feats, total_loss, mean_rate, sparse_mask, send_voxels, send_coords
+        return send_feats, total_loss, mean_rate, sparse_mask, selected_voxels, selected_coords
 
-    def map_bev_to_voxel(self, bev_mask, voxel_coords):
+    def transform_coords(self, coords, t_matrix):
         """
-        将BEV掩码映射到体素坐标
+            :param coords: [K,3] (z,y,x) agent坐标系下的体素中心坐标
+            :param t_matrix: [4,4] agent到ego的变换矩阵
+            :return: [K,3] ego坐标系下的坐标
         """
-        H, W = bev_mask.shape[-2:]
-        bev_indices = voxel_coords[:, 2] * W + voxel_coords[:, 3]  # y*W + x
-        bev_mask_flat = bev_mask.view(-1, H*W).any(dim=0)          # [H*W]
-        voxel_mask = bev_mask_flat[bev_indices.long()]             # [num_voxels]
-        return voxel_mask
+        homog_coords = F.pad(coords, (0,1), value=1.0) #[K,4]
+        ego_coords = (t_matrix @ homog_coords.T).T[:, :3]
+        return ego_coords
+
+    def generate_bev_mask(self, ego_coords, bev_shape=(200, 200), voxel_size=0.4):
+        """
+        :param ego_coords: [K,3] ego坐标系下的体素坐标
+        :return: [H,W] bool类型BEV占据掩码
+        """
+        H, W = bev_shape
+        # 计算BEV网格索引
+        x = (ego_coords[:, 2] / voxel_size).long().clamp(0, W - 1)  # x对应W维度
+        y = (ego_coords[:, 1] / voxel_size).long().clamp(0, H - 1)  # y对应H维度
+
+        # 创建BEV掩码
+        bev_mask = torch.zeros((H, W), dtype=bool)
+        bev_mask[y, x] = True
+        return bev_mask
 
     def _fuse_features(self, feature, points, voxel_coords, H, W):
         """

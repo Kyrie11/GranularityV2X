@@ -48,13 +48,9 @@ class How2commPreprocess(nn.Module):
 
     def communication(self, feats, record_len, history_list, confidence_map_list, raw_voxels, raw_coords):
         feat_list = self.regroup(feats, record_len)
-        raw_voxel_list = self.regroup(raw_voxels, record_len)
-        raw_coord_list = self.regroup(raw_coords, record_len)
-        sparse_feat_list, commu_loss, commu_rate, sparse_mask, sparse_voxel_list, sparse_coord_list = self.commu_module(
-            feat_list,confidence_map_list,raw_voxel_list, raw_coord_list)
+        sparse_feat_list, commu_loss, commu_rate, sparse_mask, sparse_voxels, sparse_coords = self.commu_module(
+            feat_list,confidence_map_list,raw_voxels, raw_coords)
         sparse_feats = torch.cat(sparse_feat_list, dim=0)
-        sparse_voxels = torch.cat(sparse_voxel_list, dim=0)
-        sparse_coords = torch.cat(sparse_coord_list, dim=0)
         sparse_history_list = []
         for i in range(len(sparse_feat_list)):
             sparse_history = torch.cat([history_list[i][:1], sparse_feat_list[i][1:]], dim=0)
