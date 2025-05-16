@@ -213,8 +213,8 @@ class Communication(nn.Module):
                     # 生成与sparse_mask同维度的随机掩码
                     replace_mask = torch.rand_like(sparse_mask)  # [C,H,W]
                     replace_mask = replace_mask < self.replace_ratio
-                    sparse_points_mask = sparse_mask & replace_mask
-                    sparse_feature_mask = sparse_mask & (~replace_mask)
+                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 elif self.replace_mode == "topk":
                     # 对每个通道独立进行topk选择
@@ -232,23 +232,25 @@ class Communication(nn.Module):
                         channel_mask[indices] = True
                         sparse_points_mask[c] = channel_mask.reshape(H, W)
 
-                    sparse_points_mask = sparse_mask & sparse_points_mask
-                    sparse_feature_mask = sparse_mask & (~sparse_points_mask)
+                    sparse_points_mask = sparse_mask.bool() & sparse_points_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~sparse_points_mask)
 
                 elif self.replace_mode == "attention":
                     # 保持通道维度
                     attention_weights = agent_channel_attention[i + 1] * agent_spatial_attention[i + 1]  # [C,H,W]
                     replace_mask = attention_weights > self.replace_ratio  # [C,H,W]
-                    sparse_points_mask = sparse_mask & replace_mask
-                    sparse_feature_mask = sparse_mask & (~replace_mask)
+                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
-                C, H, W = sparse_points_mask.shape
-                x_idx = agent_coords[:, 3].long()  # [K]
+                print(sparse_points_mask.shape)
+                _,C, H, W = sparse_points_mask.shape
+                x_idx = agent_coords[:, 3].long()# [K]
                 y_idx = agent_coords[:, 2].long()  # [K]
-                c_idx = torch.arange(C).view(-1, 1, 1).expand(-1, H, W)  # 通道索引 [C,H,W]
+                c_idx = torch.arange(C, device=agent_coords.device).view(-1, 1, 1).expand(-1, H, W)  # 通道索引 [C,H,W]
                 # 创建3D体素掩码
-                voxel_c_mask = c_idx[:, y_idx, x_idx]  # [C,K]
-                voxel_yx_mask = sparse_points_mask[:, y_idx, x_idx]  # [C,K]
+                voxel_c_mask = c_idx[:, y_idx, x_idx] # [C,K]
+                voxel_yx_mask = sparse_points_mask[:, :, y_idx, x_idx]  # [C,K]
+                voxel_yx_mask = voxel_yx_mask.squeeze(0)
                 voxel_mask = voxel_c_mask & voxel_yx_mask  # [C,K]
                 selected_agent_voxels = []
                 selected_agent_coords = []
