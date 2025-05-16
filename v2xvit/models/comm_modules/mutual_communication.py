@@ -261,8 +261,8 @@ class Communication(nn.Module):
 
                 # 跨通道合并掩码
                 combined_mask = voxel_mask.any(dim=0)  # [K]
-                selected_agent_voxels = agent_features[combined_mask]
                 selected_agent_coords = agent_coords[combined_mask]
+                selected_agent_voxels = agent_features[combined_mask]
                 selected_batch_voxels.append(selected_agent_voxels)
                 selected_batch_coords.append(selected_agent_coords)
 
