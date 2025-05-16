@@ -39,7 +39,8 @@ class VoxelProjector(nn.Module):
         :param t_matrix: [B, L, L, 4,4] 坐标变换矩阵
         """
         batch_projected = []
-        for b in range(bev_feat.size(0)):
+        print("batch大小是:", t_matrix.shape[:1])
+        for b in range(t_matrix.shape[:1]):
             # 当前batch的变换矩阵
             t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
 

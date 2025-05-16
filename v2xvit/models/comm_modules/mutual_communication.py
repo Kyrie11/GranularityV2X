@@ -243,7 +243,6 @@ class Communication(nn.Module):
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
-                print(sparse_points_mask.shape)
                 _,C, H, W = sparse_points_mask.shape
                 x_idx = agent_coords[:, 3].long()# [K]
                 y_idx = agent_coords[:, 2].long()  # [K]
@@ -253,10 +252,12 @@ class Communication(nn.Module):
                 voxel_yx_mask = sparse_points_mask[:, :, y_idx, x_idx]  # [C,K]
                 voxel_yx_mask = voxel_yx_mask.squeeze(0)
                 voxel_mask = voxel_c_mask & voxel_yx_mask  # [C,K]
+                print("voxel_mask shape:", voxel_mask.shape)
                 selected_agent_voxels = []
                 selected_agent_coords = []
                 for c in range(C):
                     channel_mask = voxel_mask[c]
+                    # print(channel_mask.shape)
                     selected_agent_voxels.append(agent_features[channel_mask])  # [K_selected,32,4]
                     selected_agent_coords.append(agent_coords[channel_mask])  # [K_selected,4]
                 # 最终体素数据组织方式
