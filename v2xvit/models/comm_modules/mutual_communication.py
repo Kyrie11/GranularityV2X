@@ -210,18 +210,20 @@ class Communication(nn.Module):
                 sparse_points_mask = torch.zeros((H, W)).bool()
                 sparse_feature_mask = torch.zeros_like(sparse_mask).bool()
                 if self.replace_mode == "random":
-                    replace_mask = torch.rand_like(sparse_mask)
-                    replace_mask = replace_mask.mean(dim=0, keepdim=True)
-                    replace_mask = replace_mask < self.replace_ratio
-                    sparse_points_mask = sparse_mask.bool() & replace_mask
+                    replace_mask = torch.rand_like(sparse_mask.mean(dim=1, keepdim=True)) < self.replace_ratio
+                    sparse_points_mask = (sparse_mask.mean(dim=1, keepdim=True)>0.5).bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
+                    sparse_points_mask = sparse_points_mask.squeeze(1)
 
                 elif self.replace_mode == "topk":
                     replace_mask = torch.zeros((1, H, W), dtype=torch.bool, device=sparse_mask.device)
-                    confidence = confidence_map_list[bs][i+1]
-                    confidence = confidence.float().mean(dim=0, keepdim=True) if confidence.dim() > 1 else confidence
+                    confidence = confidence_map_list[bs][i+1].mean(dim=0)
+                    # confidence = confidence.float().mean(dim=0, keepdim=True) if confidence.dim() > 1 else confidence
                     k = int(sparse_mask.sum() * self.replace_ratio)
-                    _, topk_indices = torch.topk(confidence.view(-1), k)
+                    k = int(H*W*self.replace_ratio)
+                    _, indices = torch.topk(confidence.flatten(), k)
+                    sparse_points_mask = torch.zeros_like(confidence).bool()
+                    sparse_points_mask.view(-1)[indices]=True
                     replace_mask.view(-1)[topk_indices] = True
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
@@ -233,8 +235,10 @@ class Communication(nn.Module):
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
-                x_idx = agent_coords[:, 3].long()
-                y_idx = agent_coords[:, 2].long()
+                H, W = sparse_points_mask.shape
+                x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W-1)
+                y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H-1)
+                print("sparse_points_mask尺寸:", sparse_points_mask.shape)
                 voxel_mask = sparse_points_mask[y_idx, x_idx]
                 selected_agent_voxels = agent_features[voxel_mask]
                 selected_agent_coords = agent_coords[voxel_mask]
