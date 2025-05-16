@@ -210,38 +210,55 @@ class Communication(nn.Module):
                 sparse_points_mask = torch.zeros((H, W)).bool()
                 sparse_feature_mask = torch.zeros_like(sparse_mask).bool()
                 if self.replace_mode == "random":
-                    replace_mask = torch.rand_like(sparse_mask.mean(dim=1, keepdim=True)) < self.replace_ratio
-                    sparse_points_mask = (sparse_mask.mean(dim=1, keepdim=True)>0.5).bool() & replace_mask
-                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
-                    sparse_points_mask = sparse_points_mask.squeeze(1)
+                    # 生成与sparse_mask同维度的随机掩码
+                    replace_mask = torch.rand_like(sparse_mask)  # [C,H,W]
+                    replace_mask = replace_mask < self.replace_ratio
+                    sparse_points_mask = sparse_mask & replace_mask
+                    sparse_feature_mask = sparse_mask & (~replace_mask)
 
                 elif self.replace_mode == "topk":
-                    replace_mask = torch.zeros((1, H, W), dtype=torch.bool, device=sparse_mask.device)
-                    confidence = confidence_map_list[bs][i+1].mean(dim=0)
-                    # confidence = confidence.float().mean(dim=0, keepdim=True) if confidence.dim() > 1 else confidence
-                    k = int(sparse_mask.sum() * self.replace_ratio)
-                    k = int(H*W*self.replace_ratio)
-                    _, indices = torch.topk(confidence.flatten(), k)
-                    sparse_points_mask = torch.zeros_like(confidence).bool()
-                    sparse_points_mask.view(-1)[indices]=True
-                    replace_mask.view(-1)[topk_indices] = True
-                    sparse_points_mask = sparse_mask.bool() & replace_mask
-                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
+                    # 对每个通道独立进行topk选择
+                    C, H, W = sparse_mask.shape[-3:]
+                    k_per_channel = int(H * W * self.replace_ratio)
+
+                    sparse_points_mask = torch.zeros_like(sparse_mask).bool()
+                    for c in range(C):
+                        # 获取当前通道的置信度
+                        channel_confidence = confidence_map_list[bs][i + 1][c]  # [H,W]
+
+                        # 对当前通道进行topk选择
+                        _, indices = torch.topk(channel_confidence.flatten(), k_per_channel)
+                        channel_mask = torch.zeros_like(channel_confidence).bool().flatten()
+                        channel_mask[indices] = True
+                        sparse_points_mask[c] = channel_mask.reshape(H, W)
+
+                    sparse_points_mask = sparse_mask & sparse_points_mask
+                    sparse_feature_mask = sparse_mask & (~sparse_points_mask)
 
                 elif self.replace_mode == "attention":
-                    attention_weights = agent_channel_attention[i+1] * agent_spatial_attention[i+1]
-                    attention_weights_mean = attention_weights.mean(dim=0, keepdim=True)  # [1, H, W]
-                    replace_mask = attention_weights_mean > self.replace_ratio
-                    sparse_points_mask = sparse_mask.bool() & replace_mask
-                    sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
+                    # 保持通道维度
+                    attention_weights = agent_channel_attention[i + 1] * agent_spatial_attention[i + 1]  # [C,H,W]
+                    replace_mask = attention_weights > self.replace_ratio  # [C,H,W]
+                    sparse_points_mask = sparse_mask & replace_mask
+                    sparse_feature_mask = sparse_mask & (~replace_mask)
 
-                H, W = sparse_points_mask.shape
-                x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W-1)
-                y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H-1)
-                print("sparse_points_mask尺寸:", sparse_points_mask.shape)
-                voxel_mask = sparse_points_mask[y_idx, x_idx]
-                selected_agent_voxels = agent_features[voxel_mask]
-                selected_agent_coords = agent_coords[voxel_mask]
+                C, H, W = sparse_points_mask.shape
+                x_idx = agent_coords[:, 3].long()  # [K]
+                y_idx = agent_coords[:, 2].long()  # [K]
+                c_idx = torch.arange(C).view(-1, 1, 1).expand(-1, H, W)  # 通道索引 [C,H,W]
+                # 创建3D体素掩码
+                voxel_c_mask = c_idx[:, y_idx, x_idx]  # [C,K]
+                voxel_yx_mask = sparse_points_mask[:, y_idx, x_idx]  # [C,K]
+                voxel_mask = voxel_c_mask & voxel_yx_mask  # [C,K]
+                selected_agent_voxels = []
+                selected_agent_coords = []
+                for c in range(C):
+                    channel_mask = voxel_mask[c]
+                    selected_agent_voxels.append(agent_features[channel_mask])  # [K_selected,32,4]
+                    selected_agent_coords.append(agent_coords[channel_mask])  # [K_selected,4]
+                # 最终体素数据组织方式
+                selected_agent_voxels = torch.cat(selected_agent_voxels, dim=0)  # [K_total,32,4]
+                selected_agent_coords = torch.cat(selected_agent_coords, dim=0)  # [K_total,4]
                 selected_batch_voxels.append(selected_agent_voxels)
                 selected_batch_coords.append(selected_agent_coords)
 
