@@ -245,22 +245,24 @@ class Communication(nn.Module):
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 _,C, H, W = sparse_points_mask.shape
-                c_idx = torch.arange(C, device=device)  # [C]
 
-                # 生成BEV索引（严格约束范围）
                 x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W - 1)  # [K]
                 y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]
-                # 创建三维掩码索引
-                # 扩展维度以匹配体素数量
-                x_idx_exp = x_idx.view(1, -1).expand(C, -1)  # [C,K]
-                y_idx_exp = y_idx.view(1, -1).expand(C, -1)  # [C,K]
-                c_idx_exp = c_idx.view(-1, 1).expand(-1, x_idx.shape[0])  # [C,K]
 
-                # 筛选有效体素
-                voxel_mask = sparse_points_mask[c_idx_exp, y_idx_exp, x_idx_exp]  # [C,K]
+                # 2. 生成通道维度索引
+                C = sparse_points_mask.shape[0]
+                c_idx = torch.arange(C, device=agent_coords.device)  # [C]
 
-                # 跨通道合并掩码
+                # 3. 创建三维掩码索引（向量化操作）
+                # 扩展维度实现广播
+                x_exp = x_idx.view(1, -1).expand(C, -1)  # [C,K]
+                y_exp = y_idx.view(1, -1).expand(C, -1)  # [C,K]
+                c_exp = c_idx.view(-1, 1).expand(-1, x_idx.shape[0])  # [C,K]
+
+                # 4. 索引掩码并合并通道
+                voxel_mask = sparse_points_mask[c_exp, y_exp, x_exp]  # [C,K]
                 combined_mask = voxel_mask.any(dim=0)  # [K]
+
                 selected_agent_coords = agent_coords[combined_mask]
                 selected_agent_voxels = agent_features[combined_mask]
                 selected_batch_voxels.append(selected_agent_voxels)
