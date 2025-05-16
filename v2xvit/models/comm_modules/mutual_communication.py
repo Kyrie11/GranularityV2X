@@ -172,6 +172,7 @@ class Communication(nn.Module):
                 agent_mask = (batch_voxel_coords[:, 0] == global_agent_id)
                 agent_coords = batch_voxel_coords[agent_mask].to(device)
                 agent_features = batch_voxel_features[agent_mask].to(device)
+                print("agent features的形状是:", agent_features.shape)
                 if self.request_flag:
                     channel_coefficient = self.channel_fusion(torch.cat(
                         [ego_channel_request, agent_channel_attention[i+1, ].unsqueeze(0)], dim=1))  
@@ -244,13 +245,15 @@ class Communication(nn.Module):
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
                 _,C, H, W = sparse_points_mask.shape
+                print("sparse_points_mask shape是：", sparse_points_mask.shape)
                 x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W - 1)
                 y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)
                 voxel_mask = sparse_points_mask[:, y_idx, x_idx]  # 直接索引
-
+                print("voxel_mask :", voxel_mask.shape)
                 # 筛选体素（跨通道取或）
+
                 combined_mask = voxel_mask.any(dim=0)  # [K]
-                print("voxel_mask shape:", voxel_mask.shape)
+                print("combine_mask shape:", combined_mask.shape)
                 selected_agent_voxels = agent_features[combined_mask]
                 selected_agent_coords = agent_coords[combined_mask]
                 selected_batch_voxels.append(selected_agent_voxels)
