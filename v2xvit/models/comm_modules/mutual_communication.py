@@ -125,7 +125,7 @@ class Communication(nn.Module):
         self.gaussian_filter.weight.data = gaussian_kernel
         self.gaussian_filter.bias.data.zero_()
 
-    def forward(self, feat_list, pairwise_t_matrix, confidence_map_list=None, raw_voxels=None, raw_coords=None):
+    def forward(self, feat_list, confidence_map_list=None, raw_voxels=None, raw_coords=None):
         send_feats = []
         selected_voxels = []
         selected_coords = []
