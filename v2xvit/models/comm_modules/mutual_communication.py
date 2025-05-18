@@ -253,7 +253,7 @@ class Communication(nn.Module):
                 y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]
 
                 # ==== 生成三维掩码索引 ====
-                voxel_mask = sparse_points_mask[:, y_idx, x_idx].any(dim=0)
+                voxel_mask = sparse_points_mask[:, y_idx, x_idx]
                 print("voxel_mask:", len(voxel_mask))
                 if False in voxel_mask:
                     print("确实存在False")
