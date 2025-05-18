@@ -20,7 +20,7 @@ class VoxelProjector(nn.Module):
     def __init__(self, in_channels=4, bev_channels=256, voxel_size=0.4):
         super().__init__()
         self.voxel_encoder = nn.Sequential(
-            nn.Linear(in_channels, 64),
+            nn.Linear(4, 64),
             nn.ReLU(),
             nn.Linear(64, bev_channels)
         )
