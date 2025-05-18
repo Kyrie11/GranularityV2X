@@ -63,15 +63,15 @@ class VoxelProjector(nn.Module):
                 print("voxel_features.shape=", voxel_features.shape)
                 # 特征编码
                 encoded = self.voxel_encoder(voxel_features)
+                encoded = encoded.permute(1, 0)  # [64, N_selected]
+                indices = y_idx*W + x_idx
+
                 print("encoded.shape=", encoded.shape)
                 # 累积到投影特征
-                projected.scatter_add_(
-                    1,
-                    y_idx * W + x_idx,
-                    encoded.mean(dim=-1).T  # [C, N] -> [N, C]
-                )
-
-            # 与原始特征融合
+                projected.scatter_add_(1,
+                                       indices.unsqueeze(0).expand(C, -1),  # [C, N_selected]
+                                       encoded)
+                # 与原始特征融合
             fused = self.bev_fusion(torch.cat([
                 bev_feat[b].unsqueeze(0),
                 projected.unsqueeze(0)
