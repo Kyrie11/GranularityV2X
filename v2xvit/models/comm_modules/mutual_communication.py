@@ -248,7 +248,7 @@ class Communication(nn.Module):
 
                 sparse_points_mask = sparse_points_mask.squeeze(0)
                 C, H, W = sparse_points_mask.shape
-
+                print("sparse_points_mask:", sparse_points_mask)
                 x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W - 1)  # [K]
                 y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]
 

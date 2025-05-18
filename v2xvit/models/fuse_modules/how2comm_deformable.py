@@ -43,13 +43,10 @@ class VoxelProjector(nn.Module):
         for b in range(B):
             # 当前batch的变换矩阵
             cav_num = record_len[b]
-            print("cav num是", cav_num)
             t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
-            print("t_matrix_batch的形状是", t_matrix_batch.shape)
             # 初始化投影特征
             C, H, W = bev_feat.shape[1:]
             projected = torch.zeros_like(bev_feat[b])
-            print("len(sparse_coords(b))是", len(sparse_coords[b]))
             # 遍历每个协作agent（从索引1开始）
             for agent_id in range(0, cav_num-1):
                 print("len(sparse_voxels[b][i]=", sparse_voxels[b][agent_id].shape)
@@ -68,8 +65,11 @@ class VoxelProjector(nn.Module):
                 encoded = self.voxel_encoder(voxel_features)
 
                 # 累积到投影特征
-                for x, y, feat in zip(x_idx, y_idx, encoded):
-                    projected[:, y, x] += feat
+                projected.scatter_add_(
+                    1,
+                    y_idx * W + x_idx,
+                    encoded.mean(dim=-1).T  # [C, N] -> [N, C]
+                )
 
             # 与原始特征融合
             fused = self.bev_fusion(torch.cat([
