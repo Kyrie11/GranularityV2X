@@ -130,11 +130,10 @@ class How2comm(nn.Module):
 
     def forward(self, x, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
         _, C, H, W = x.shape
-        print("pair_wise_matrix的形状是", pairwise_t_matrix.shape)
+        pairwise_t_matrix_4d = pairwise_t_matrix
         B, L = pairwise_t_matrix.shape[:2]
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
             0, 1], :][:, :, :, :, [0, 1, 3]]
-        print("pair_wise_matrix的形状是", pairwise_t_matrix.shape)
         pairwise_t_matrix[..., 0, 1] = pairwise_t_matrix[..., 0, 1] * H / W
         pairwise_t_matrix[..., 1, 0] = pairwise_t_matrix[..., 1, 0] * W / H
         pairwise_t_matrix[..., 0, 2] = pairwise_t_matrix[..., 0,
@@ -200,7 +199,6 @@ class How2comm(nn.Module):
                             temp_psm_list.append(warp_affine_simple(confidence_maps[b], t_matrix[0, :, :, :], (H, W)))  
                         x = torch.cat(temp_list, dim=0)
                         his = torch.cat(history_list, dim=0)
-                        print("pair_wise_matrix的形状是", pairwise_t_matrix.shape)
                         if self.communication_flag:
                             sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
                             x, record_len,history_list,temp_psm_list, raw_voxels, raw_coords)
@@ -210,7 +208,7 @@ class How2comm(nn.Module):
                                 record_len,
                                 sparse_voxels,
                                 sparse_coords,
-                                pairwise_t_matrix
+                                pairwise_t_matrix_4d
                             )
                             # 多模态特征融合
                             x = torch.cat([x, voxel_bev], dim=1)
