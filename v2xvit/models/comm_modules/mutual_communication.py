@@ -141,6 +141,7 @@ class Communication(nn.Module):
             cav_num, C, H, W = agent_feature.shape
             batch_mask = (raw_coords[:, 0] >= batch_start) & \
                          (raw_coords[:, 0] < batch_start + cav_num)
+            print("batch start 是", batch_start, ",batch_end是", batch_start+cav_num, ",batch_mask是", batch_mask)
             batch_voxel_coords = raw_coords[batch_mask]
             batch_voxel_features = raw_voxels[batch_mask]
 
@@ -167,7 +168,7 @@ class Communication(nn.Module):
 
 
 
-            for i in range(cav_num - 1):
+            for i in range(cav_num-1):
                 global_agent_id = batch_start + i +1
                 agent_mask = (batch_voxel_coords[:, 0] == global_agent_id)
                 agent_coords = batch_voxel_coords[agent_mask].to(device)
