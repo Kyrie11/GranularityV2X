@@ -52,7 +52,7 @@ class VoxelProjector(nn.Module):
             print("len(sparse_coords(b))是", len(sparse_coords[b]))
             # 遍历每个协作agent（从索引1开始）
             for agent_id in range(0, cav_num-1):
-                print("len(sparse_coords[b][i]=", len(sparse_coords[b][agent_id]))
+                print("len(sparse_voxels[b][i]=", len(sparse_voxels[b][agent_id]))
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1.0)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
