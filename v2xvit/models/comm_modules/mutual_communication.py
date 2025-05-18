@@ -244,25 +244,14 @@ class Communication(nn.Module):
                     sparse_points_mask = sparse_mask.bool() & replace_mask
                     sparse_feature_mask = sparse_mask.bool() & (~replace_mask)
 
-                _,C, H, W = sparse_points_mask.shape
+                sparse_points_mask = sparse_points_mask.squeeze(0)
+                C, H, W = sparse_points_mask.shape
 
                 x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W - 1)  # [K]
                 y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]
 
                 # ==== 生成三维掩码索引 ====
-                voxel_mask = torch.zeros(len(agent_coords), dtype=torch.bool, device=device)  # [K]
-
-                # 遍历每个通道
-                for c in range(C):
-                    # 获取当前通道的BEV掩码 [H,W]
-                    channel_mask = sparse_points_mask[c]
-
-                    # 生成当前通道的体素掩码
-                    channel_voxel_mask = channel_mask[y_idx, x_idx]  # [K]
-
-                    # 累积掩码（任一通道选中即保留）
-                    voxel_mask |= channel_voxel_mask
-
+                voxel_mask = sparse_points_mask[:, y_idx, x_idx].any(dim=0)
 
                 selected_agent_coords = agent_coords[voxel_mask]
                 selected_agent_voxels = agent_features[voxel_mask]
