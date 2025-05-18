@@ -139,6 +139,7 @@ class Communication(nn.Module):
             agent_feature = feat_list[bs]
             device = agent_feature.device
             cav_num, C, H, W = agent_feature.shape
+            print("cav_num 2是", cav_num)
             batch_mask = (raw_coords[:, 0] >= batch_start) & \
                          (raw_coords[:, 0] < batch_start + cav_num)
             print("batch start 是", batch_start, ",batch_end是", batch_start+cav_num, ",batch_mask是", batch_mask)
