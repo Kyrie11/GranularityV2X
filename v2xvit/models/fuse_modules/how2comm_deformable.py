@@ -40,8 +40,6 @@ class VoxelProjector(nn.Module):
         """
         batch_projected = []
         B= t_matrix.shape[0]
-        print('Batch是',B)
-        print("t_matrix的形状是", t_matrix.shape)
         for b in range(B):
             # 当前batch的变换矩阵
             cav_num = record_len[b]
@@ -200,6 +198,7 @@ class How2comm(nn.Module):
                             temp_psm_list.append(warp_affine_simple(confidence_maps[b], t_matrix[0, :, :, :], (H, W)))  
                         x = torch.cat(temp_list, dim=0)
                         his = torch.cat(history_list, dim=0)
+                        print("pair_wise_matrix的形状是", pairwise_t_matrix.shape)
                         if self.communication_flag:
                             sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
                             x, record_len,history_list,temp_psm_list, raw_voxels, raw_coords)
