@@ -39,7 +39,9 @@ class VoxelProjector(nn.Module):
         :param t_matrix: [B, L, L, 4,4] 坐标变换矩阵
         """
         batch_projected = []
-        B, L = t_matrix.shape[:2]
+        B= t_matrix.shape[0]
+        print('Batch是',B)
+        print("t_matrix的形状是", t_matrix.shape)
         for b in range(B):
             # 当前batch的变换矩阵
             cav_num = record_len[b]
@@ -131,7 +133,6 @@ class How2comm(nn.Module):
     def forward(self, x, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
         _, C, H, W = x.shape
         B, L = pairwise_t_matrix.shape[:2]
-        print("pairwise_t_matrix的原始形状：", pairwise_t_matrix.shape)
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
             0, 1], :][:, :, :, :, [0, 1, 3]]  
         pairwise_t_matrix[..., 0, 1] = pairwise_t_matrix[..., 0, 1] * H / W
