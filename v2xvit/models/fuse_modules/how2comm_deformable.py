@@ -31,7 +31,7 @@ class VoxelProjector(nn.Module):
         )
         self.voxel_size = voxel_size
 
-    def forward(self, bev_feat, sparse_voxels, sparse_coords, t_matrix):
+    def forward(self, bev_feat, record_len, sparse_voxels, sparse_coords, t_matrix):
         """
         :param bev_feat: [B, C, H, W] 原始BEV特征
         :param sparse_voxels: list[Tensor] 各agent的稀疏体素特征
@@ -42,7 +42,8 @@ class VoxelProjector(nn.Module):
         B, L = t_matrix.shape[:2]
         for b in range(B):
             # 当前batch的变换矩阵
-            print("cav num是", L)
+            cav_num = record_len[b]
+            print("cav num是", cav_num)
             t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
             print("t_matrix_batch的形状是", t_matrix_batch.shape)
             # 初始化投影特征
@@ -50,7 +51,7 @@ class VoxelProjector(nn.Module):
             projected = torch.zeros_like(bev_feat[b])
             print("len(sparse_coords(b))是", len(sparse_coords[b]))
             # 遍历每个协作agent（从索引1开始）
-            for agent_id in range(1, L):
+            for agent_id in range(1, cav_num):
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
@@ -204,6 +205,7 @@ class How2comm(nn.Module):
                             # 体素投影融合
                             voxel_bev = self.voxel_projector(
                                 x,
+                                record_len,
                                 sparse_voxels,
                                 sparse_coords,
                                 pairwise_t_matrix
