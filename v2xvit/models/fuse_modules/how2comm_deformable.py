@@ -63,7 +63,7 @@ class VoxelProjector(nn.Module):
                 print("voxel_features.shape=", voxel_features.shape)
                 # 特征编码
                 encoded = self.voxel_encoder(voxel_features)
-
+                print("encoded.shape=", encoded.shape)
                 # 累积到投影特征
                 projected.scatter_add_(
                     1,
