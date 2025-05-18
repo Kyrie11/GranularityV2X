@@ -62,9 +62,9 @@ class VoxelProjector(nn.Module):
                 # 量化到BEV网格
                 x_idx = (ego_coords[:, 0] / self.voxel_size).long().clamp(0, W - 1)
                 y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
-                print("len(sparse_voxels[b][i]=", len(sparse_voxels[b][agent_id]))
+                voxel_features = sparse_voxels[b][agent_id].mean(dim=1)
                 # 特征编码
-                encoded = self.voxel_encoder(sparse_voxels[b][agent_id])
+                encoded = self.voxel_encoder(voxel_features)
 
                 # 累积到投影特征
                 for x, y, feat in zip(x_idx, y_idx, encoded):
