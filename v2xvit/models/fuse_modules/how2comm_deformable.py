@@ -53,7 +53,7 @@ class VoxelProjector(nn.Module):
             # 遍历每个协作agent（从索引1开始）
             for agent_id in range(0, cav_num-1):
                 # 坐标转换
-                homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1)
+                homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1.0)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
                 print("homog_coords的形状是", homog_coords.shape)
                 ego_coords = (t_matrix_batch[0, agent_id] @ homog_coords.T).T[:, :3]
