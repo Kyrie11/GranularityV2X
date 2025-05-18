@@ -131,7 +131,7 @@ class How2comm(nn.Module):
     def forward(self, x, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
         _, C, H, W = x.shape
         B, L = pairwise_t_matrix.shape[:2]
-
+        print("pairwise_t_matrix的原始形状：", pairwise_t_matrix.shape)
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
             0, 1], :][:, :, :, :, [0, 1, 3]]  
         pairwise_t_matrix[..., 0, 1] = pairwise_t_matrix[..., 0, 1] * H / W
