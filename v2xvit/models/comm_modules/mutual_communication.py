@@ -259,7 +259,8 @@ class Communication(nn.Module):
                 selected_agent_voxels = agent_features[voxel_mask]
                 selected_batch_voxels.append(selected_agent_voxels)
                 selected_batch_coords.append(selected_agent_coords)
-
+                print("len(selected_agent_coords)=", len(selected_agent_coords))
+                print("len(agent_coords)=", len(agent_coords))
                 feature_rate = sparse_feature_mask.sum() / (C * H * W)
                 voxel_rate = sparse_points_mask.sum() / (H * W)
                 comm_rate = feature_rate + 3.0 * voxel_rate
