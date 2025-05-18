@@ -98,7 +98,7 @@ def setup_train(hypes):
     folder_name = model_name + folder_name
     current_path = os.path.dirname(__file__)
     current_path = os.path.join(current_path, '../logs')
-    full_path = os.path.join("/home/wang/code/Granularity/logs/", folder_name)
+    full_path = os.path.join("/home/wang/code/GranularityV2X/logs/", folder_name)
     # full_path = os.path.join(current_path, folder_name)
 
     if not os.path.exists(full_path):
