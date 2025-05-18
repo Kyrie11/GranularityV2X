@@ -213,6 +213,7 @@ class How2comm(nn.Module):
                                 pairwise_t_matrix_4d
                             )
                             # 多模态特征融合
+                            print('x.shape=', x.shape, ", voxel_bev.shape=", voxel_bev.shape)
                             x = torch.cat([x, voxel_bev], dim=1)
                             x = self.channel_fuse(x)
 
