@@ -63,6 +63,7 @@ class VoxelProjector(nn.Module):
                 x_idx = (ego_coords[:, 0] / self.voxel_size).long().clamp(0, W - 1)
                 y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
                 voxel_features = sparse_voxels[b][agent_id].mean(dim=1)
+                print("voxel_features.shape=", voxel_features.shape)
                 # 特征编码
                 encoded = self.voxel_encoder(voxel_features)
 
