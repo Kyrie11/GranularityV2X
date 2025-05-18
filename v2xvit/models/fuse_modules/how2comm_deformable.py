@@ -17,7 +17,7 @@ from v2xvit.models.sub_modules.point_pillar_scatter import PointPillarScatter
 
 
 class VoxelProjector(nn.Module):
-    def __init__(self, in_channels=32, bev_channels=256, voxel_size=0.4):
+    def __init__(self, in_channels=4, bev_channels=256, voxel_size=0.4):
         super().__init__()
         self.voxel_encoder = nn.Sequential(
             nn.Linear(in_channels, 64),
@@ -52,7 +52,7 @@ class VoxelProjector(nn.Module):
             print("len(sparse_coords(b))是", len(sparse_coords[b]))
             # 遍历每个协作agent（从索引1开始）
             for agent_id in range(0, cav_num-1):
-                print("len(sparse_voxels[b][i]=", len(sparse_voxels[b][agent_id]))
+                print("len(sparse_voxels[b][i]=", sparse_voxels[b][agent_id].shape)
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1.0)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
@@ -64,7 +64,6 @@ class VoxelProjector(nn.Module):
                 y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
                 print("len(sparse_voxels[b][i]=", len(sparse_voxels[b][agent_id]))
                 # 特征编码
-                print(sparse_voxels[b][agent_id][:, 3])
                 encoded = self.voxel_encoder(sparse_voxels[b][agent_id])
 
                 # 累积到投影特征
