@@ -129,7 +129,7 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
-
+            print("record len是", record_len)
             batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
             feature_list.append(spatial_features)
