@@ -43,8 +43,9 @@ class VoxelProjector(nn.Module):
         print("batch大小是:", B)
         for b in range(B):
             # 当前batch的变换矩阵
+            print("cav num是", L)
             t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
-
+            print("t_matrix_batch的形状是", t_matrix_batch.shape)
             # 初始化投影特征
             C, H, W = bev_feat.shape[1:]
             projected = torch.zeros_like(bev_feat[b])
@@ -53,7 +54,7 @@ class VoxelProjector(nn.Module):
             for agent_id in range(1, len(sparse_voxels[b])):
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1)
-                print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
+                # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
                 print("homog_coords的形状是", homog_coords.shape)
                 ego_coords = (t_matrix_batch[0, agent_id] @ homog_coords.T).T[:, :3]
 
