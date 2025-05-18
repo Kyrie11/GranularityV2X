@@ -51,7 +51,7 @@ class VoxelProjector(nn.Module):
             projected = torch.zeros_like(bev_feat[b])
             print("len(sparse_coords(b))是", len(sparse_coords[b]))
             # 遍历每个协作agent（从索引1开始）
-            for agent_id in range(1, cav_num):
+            for agent_id in range(0, cav_num-1):
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
