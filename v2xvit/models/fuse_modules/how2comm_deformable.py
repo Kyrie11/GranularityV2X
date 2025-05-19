@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from PyQt5.QtWidgets.QTableWidget import verticalOffset
 from torch.nn import functional as F
 from torch import batch_norm, einsum
 from einops import rearrange, repeat
