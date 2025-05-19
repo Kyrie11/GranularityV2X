@@ -22,7 +22,7 @@ class VoxelProjector(nn.Module):
         self.voxel_encoder = nn.Sequential(
             nn.Linear(4, 64),
             nn.ReLU(),
-            nn.Linear(64, bev_channels)
+            nn.Linear(64, 256)
         )
         self.bev_fusion = nn.Sequential(
             nn.Conv2d(bev_channels * 2, bev_channels, 3, padding=1),
@@ -59,28 +59,30 @@ class VoxelProjector(nn.Module):
 
                 # 量化到BEV网格
                 x_idx = (ego_coords[:, 0] / self.voxel_size).long().clamp(0, W - 1)
+                print("x_idx:",x_idx)
                 y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
                 voxel_features = sparse_voxels[b][agent_id].mean(dim=1)
                 encoded = self.voxel_encoder(voxel_features)
-                encoded = encoded.permute(1, 0)
-                # valid_mask = (x_idx >= 0) & (x_idx < W) & (y_idx >= 0) & (y_idx < H)
-                # projected.index_put_(
-                #     (y_idx[valid_mask], x_idx[valid_mask]),
-                #     encoded[valid_mask],
-                #     accumulate=True
-                # )
+                print("encoded.shape=", encoded.shape)
+                valid_mask = (x_idx >= 0) & (x_idx < W) & (y_idx >= 0) & (y_idx < H)
+                print("projected的shape是：", agent_projected.shape)
+                agent_projected.index_put_(
+                    indices=(y_idx[valid_mask], x_idx[valid_mask]),
+                    values=encoded[valid_mask],
+                    accumulate=True
+                )
                 # print("voxel_features.shape=", voxel_features.shape)
                 # 特征编码
                  # [64, N_selected]
                 indices = y_idx*W + x_idx
 
-                print("encoded.shape=", encoded.shape)
+
                 # 累积到投影特征
-                agent_projected.scatter_add_(1,
-                                       indices.unsqueeze(0).expand(C, -1),  # [C, N_selected]
-                                       encoded)
+                # agent_projected.scatter_add_(1,
+                #                        indices.unsqueeze(0).expand(C, -1),  # [C, N_selected]
+                #                        encoded)
                 # 与原始特征融合
-                print("projected的shape是：", agent_projected.shape)
+
 
                 # fused = self.bev_fusion(torch.cat([
                 #     bev_feat[b].unsqueeze(0),
