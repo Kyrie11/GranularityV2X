@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from PyQt5.QtWidgets.QTableWidget import verticalOffset
 from torch.nn import functional as F
 from torch import batch_norm, einsum
 from einops import rearrange, repeat
@@ -41,44 +42,104 @@ class VoxelProjector(nn.Module):
         batch_projected = []
         B= t_matrix.shape[0]
         for b in range(B):
+            projected = []
             # 当前batch的变换矩阵
             cav_num = record_len[b]
             t_matrix_batch = t_matrix[b]  # [L, L, 4,4]
             # 初始化投影特征
             C, H, W = bev_feat.shape[1:]
-            projected = torch.zeros_like(bev_feat[b])
             # 遍历每个协作agent（从索引1开始）
             for agent_id in range(0, cav_num-1):
+                agent_projected = torch.zeros_like(bev_feat[b])
                 print("len(sparse_voxels[b][i]=", sparse_voxels[b][agent_id].shape)
                 # 坐标转换
                 homog_coords = F.pad(sparse_coords[b][agent_id][:, 1:], (0, 1), value=1.0)
                 # print("t_matrix_batch的形状是", t_matrix_batch[0, agent_id].shape)
-                print("homog_coords的形状是", homog_coords.shape)
+                # print("homog_coords的形状是", homog_coords.shape)
                 ego_coords = ((t_matrix_batch[0, agent_id]).double() @ (homog_coords.T).double()).T[:, :3]
 
                 # 量化到BEV网格
                 x_idx = (ego_coords[:, 0] / self.voxel_size).long().clamp(0, W - 1)
                 y_idx = (ego_coords[:, 1] / self.voxel_size).long().clamp(0, H - 1)
                 voxel_features = sparse_voxels[b][agent_id].mean(dim=1)
-                print("voxel_features.shape=", voxel_features.shape)
-                # 特征编码
                 encoded = self.voxel_encoder(voxel_features)
-                encoded = encoded.permute(1, 0)  # [64, N_selected]
+                encoded = encoded.permute(1, 0)
+                # valid_mask = (x_idx >= 0) & (x_idx < W) & (y_idx >= 0) & (y_idx < H)
+                # projected.index_put_(
+                #     (y_idx[valid_mask], x_idx[valid_mask]),
+                #     encoded[valid_mask],
+                #     accumulate=True
+                # )
+                # print("voxel_features.shape=", voxel_features.shape)
+                # 特征编码
+                 # [64, N_selected]
                 indices = y_idx*W + x_idx
 
                 print("encoded.shape=", encoded.shape)
                 # 累积到投影特征
-                projected.scatter_add_(1,
+                agent_projected.scatter_add_(1,
                                        indices.unsqueeze(0).expand(C, -1),  # [C, N_selected]
                                        encoded)
                 # 与原始特征融合
-            fused = self.bev_fusion(torch.cat([
-                bev_feat[b].unsqueeze(0),
-                projected.unsqueeze(0)
-            ], dim=1))
-            batch_projected.append(fused)
+                print("projected的shape是：", agent_projected.shape)
 
-        return torch.cat(batch_projected)
+                # fused = self.bev_fusion(torch.cat([
+                #     bev_feat[b].unsqueeze(0),
+                #     projected.unsqueeze(0)
+                # ], dim=1))
+                projected.append(agent_projected)
+            batch_projected.append(projected)
+
+        return batch_projected
+
+class HierarchicalFusion(nn.Module):
+    def __init__(self, in_channels=64, bev_channels=64):
+        super().__init__()
+        # 体素特征增强分支
+        self.voxel_fusion = nn.Sequential(
+            nn.Conv2d(bev_channels, bev_channels, 3, padding=1),
+            nn.BatchNorm2d(bev_channels),
+            nn.ReLU()
+        )
+
+        # 稀疏特征增强分支
+        self.feature_fusion = nn.Sequential(
+            nn.Conv2d(in_channels, bev_channels, 3, padding=1),
+            nn.BatchNorm2d(bev_channels),
+            nn.ReLU()
+        )
+
+        # 跨模态注意力融合
+        self.cross_attention = nn.Sequential(
+            nn.Conv2d(bev_channels * 2, bev_channels // 2, 1),
+            nn.ReLU(),
+            nn.Conv2d(bev_channels // 2, 2, 1),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, ego_feat, voxel_bev, sparse_feat):
+        """
+        ego_feat: [B,64,H,W] 原始特征
+        voxel_bev: [B,64,H,W] 体素投影特征
+        sparse_feat: [B,64,H,W] 稀疏通信特征
+        """
+        # 体素特征增强
+        voxel_enhanced = self.voxel_fusion(voxel_bev)  # [B,64,H,W]
+
+        # 稀疏特征增强
+        feature_enhanced = self.feature_fusion(sparse_feat)  # [B,64,H,W]
+
+        # 跨模态注意力权重
+        attention = self.cross_attention(
+            torch.cat([voxel_enhanced, feature_enhanced], dim=1))  # [B,2,H,W]
+
+        # 加权融合
+        fused_feat = (attention[:, 0:1] * voxel_enhanced +
+                      attention[:, 1:2] * feature_enhanced)  # [B,64,H,W]
+
+        # 残差连接
+        return ego_feat + fused_feat
+
 
 class How2comm(nn.Module):
     def __init__(self, args, args_pre):
@@ -124,6 +185,8 @@ class How2comm(nn.Module):
             bev_channels=64 if 'num_filters' not in args else args['num_filters'][0],
             voxel_size=args['voxel_size'][0]
         )
+
+        self.hierarchical_fusion = HierarchicalFusion()
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
@@ -212,6 +275,8 @@ class How2comm(nn.Module):
                                 sparse_coords,
                                 pairwise_t_matrix_4d
                             )
+                            voxel_bev = torch.stack(voxel_bev, dim=0)
+                            print("voxel_bev的形状是:", voxel_bev.shape)
                             # 多模态特征融合
                             print('x.shape=', x.shape, ", voxel_bev.shape=", voxel_bev.shape)
                             x = torch.cat([x, voxel_bev], dim=1)
