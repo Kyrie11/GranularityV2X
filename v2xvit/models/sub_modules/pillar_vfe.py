@@ -88,6 +88,12 @@ class PillarVFE(nn.Module):
         self.y_offset = self.voxel_y / 2 + point_cloud_range[1]
         self.z_offset = self.voxel_z / 2 + point_cloud_range[2]
 
+        self.z_idx_in_features = 2
+        self.intensity_idx_in_features = 3
+        if self.num_point_features <= max(self.z_idx_in_features, self.intensity_idx_in_features):
+            print(f"Warning: num_point_features ({self.num_point_features}) is small. "
+                  f"Ensure z_idx ({self.z_idx_in_features}) and intensity_idx ({self.intensity_idx_in_features}) are correct.")
+
     def get_output_feature_dim(self):
         return self.num_filters[-1]
 
@@ -106,14 +112,16 @@ class PillarVFE(nn.Module):
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
+        print("voxel_features:", voxel_features)
+        valid_num_points = voxel_num_points.type_as(voxel_features).view(-1, 1) + 1e-6  # [N_pillars, 1]
+        max_points = voxel_features.shape[1]
 
         intensity_features = voxel_features[..., 3]
         avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
 
         pillar_occupancy = (voxel_num_points>0).float()
-        pillar_pointnum = voxel_num_points.point()
         pillar_intensity = avg_intensity
-        vox_bev = torch.cat([pillar_occupancy, pillar_pointnum, pillar_intensity], dim=1)
+        vox_bev = torch.cat([pillar_occupancy, voxel_num_points, pillar_intensity], dim=1)
         print("vox_bev的形状：",vox_bev.shape)
 
         batch_dict['raw_points'] = {
