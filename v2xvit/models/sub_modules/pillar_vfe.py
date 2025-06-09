@@ -113,6 +113,7 @@ class PillarVFE(nn.Module):
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
+        print("voxel_features.shape=", voxel_features.shape)
         valid_num_points = voxel_num_points.type_as(voxel_features).view(-1, 1) + 1e-6  # [N_pillars, 1]
         max_points = voxel_features.shape[1]
         arange = torch.arange(max_points, device=voxel_features.device)[None, :] < voxel_num_points[:, None]
