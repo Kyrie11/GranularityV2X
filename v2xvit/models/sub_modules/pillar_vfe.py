@@ -116,6 +116,7 @@ class PillarVFE(nn.Module):
         self.pfn_layers = nn.ModuleList(pfn_layers)
 
         self.voxel_x = voxel_size[0]
+        print("voxel_x:", self.voxel_x)
         self.voxel_y = voxel_size[1]
         self.voxel_z = voxel_size[2]
         self.x_offset = self.voxel_x / 2 + point_cloud_range[0]
