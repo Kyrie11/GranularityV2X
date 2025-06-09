@@ -178,7 +178,7 @@ class PillarVFE(nn.Module):
                                      keepdim=True)
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
-
+        print("没有经过pfn之前:", features.shape)
         voxel_count = features.shape[1]
         mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
                                            axis=0)
