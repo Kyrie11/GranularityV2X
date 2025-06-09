@@ -255,8 +255,8 @@ class PointPillarHow2comm(nn.Module):
 
         psm_single = self.cls_head(spatial_features_2d) #分类预测图 [batch_size, anchors, H, W]
         rm_single = self.reg_head(spatial_features_2d)  #回归预测图 [batch_size, anchors * cls_num, H, W]
-        det_bev = torch.cat([psm_single, rm_single], dim=0)
-        print("det_bev的形状：", det_bev.shape)
+        # det_bev = torch.cat([psm_single, rm_single], dim=0)
+        # print("det_bev的形状：", det_bev.shape)
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(spatial_features, psm_single, record_len,pairwise_t_matrix,self.backbone,[self.shrink_conv, self.cls_head, self.reg_head], raw_voxels=raw_voxel_features_list[0], raw_coords=raw_voxel_coords_list[0])
