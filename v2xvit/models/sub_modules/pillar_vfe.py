@@ -123,8 +123,10 @@ class PillarVFE(nn.Module):
 
         self.nx = - point_cloud_range[0] / self.voxel_x * 2
         self.ny = - point_cloud_range[1] / self.voxel_y * 2
-        print("nx in pillarvfe :", self.nx)
-        print("ny in pillarvfe :", self.ny)
+        self.nz = 1
+
+
+
 
     def get_output_feature_dim(self):
         return self.num_filters[-1]
@@ -172,11 +174,10 @@ class PillarVFE(nn.Module):
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
 
-        # C = features.shape[2]
-        # nx, ny, nz = self.grid_sizes
-        # scatter = CustomPointScatter(grid_size=(nx, ny, nz), C_bev=C)
-        # bev_feat = scatter(features, coords)
-        # print("bev_feat.shape:", bev_feat.shape)
+        C = features.shape[2]
+        scatter = CustomPointScatter(grid_size=(self.nx, self.ny, self.nz), C_bev=C)
+        bev_feat = scatter(features, coords)
+        print("bev_feat.shape:", bev_feat.shape)
 
         voxel_count = features.shape[1]
         mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
