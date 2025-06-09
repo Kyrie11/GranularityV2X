@@ -149,11 +149,13 @@ class PointPillarHow2comm(nn.Module):
 
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
-        det_bev = torch.cat([psm_single, rm_single], dim=0)
-        print("det_bev.shape:", det_bev.shape)
+        print("vox_bev.shape:", vox_bev.shape)
         print("psm_single.shape:", psm_single.shape)
         print("rm_single.shape:", rm_single.shape)
-        print("vox_bev.shape:", vox_bev.shape)
+        det_bev = torch.cat([psm_single, rm_single], dim=0)
+        print("det_bev.shape:", det_bev.shape)
+
+
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
