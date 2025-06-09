@@ -22,6 +22,7 @@ class PointPillarHow2comm(nn.Module):
 
         nx, ny, nz = args['point_pillar_scatter']['grid_size']
         grid_sizes = [nx, ny, nz]
+        print(grid_sizes)
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
                                     grid_sizes=grid_sizes,
                                     num_point_features=4,
