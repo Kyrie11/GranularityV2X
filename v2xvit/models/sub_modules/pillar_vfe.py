@@ -87,9 +87,10 @@ class PFNLayer(nn.Module):
 
 
 class PillarVFE(nn.Module):
-    def __init__(self, model_cfg, num_point_features, voxel_size,
+    def __init__(self, grid_size, model_cfg, num_point_features, voxel_size,
                  point_cloud_range):
         super().__init__()
+        self.grid_size = grid_size
         self.model_cfg = model_cfg
 
         self.use_norm = self.model_cfg['use_norm']
@@ -170,10 +171,10 @@ class PillarVFE(nn.Module):
         features = torch.cat(features, dim=-1)
 
         C = features.shape[2]
-        # nx, ny, nz = self.model_cfg['grid_size']
-        # scatter = CustomPointScatter(grid_size=(nx, ny, nz), C_bev=C)
-        # bev_feat = scatter(features, coords)
-        # print("bev_feat.shape:", bev_feat.shape)
+        nx, ny, nz = self.grid_size
+        scatter = CustomPointScatter(grid_size=(nx, ny, nz), C_bev=C)
+        bev_feat = scatter(features, coords)
+        print("bev_feat.shape:", bev_feat.shape)
 
         voxel_count = features.shape[1]
         mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
