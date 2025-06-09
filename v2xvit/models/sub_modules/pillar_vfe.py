@@ -173,6 +173,7 @@ class PillarVFE(nn.Module):
                                      keepdim=True)
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
+        print("features.shape:", features.shape)
 
         C = features.shape[2]
         scatter = CustomPointScatter(grid_size=(self.nx, self.ny, self.nz), C_bev=C)
