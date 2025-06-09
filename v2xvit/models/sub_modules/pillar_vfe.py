@@ -115,15 +115,38 @@ class PillarVFE(nn.Module):
             batch_dict['voxel_coords']
         valid_num_points = voxel_num_points.type_as(voxel_features).view(-1, 1) + 1e-6  # [N_pillars, 1]
         max_points = voxel_features.shape[1]
-        print("max_points:", max_points)
+        arange = torch.arange(max_points, device=voxel_features.device)[None, :] < voxel_num_points[:, None]
+        # arange is [N_pillars, max_points], True for valid points
 
-        intensity_features = voxel_features[..., 3]
-        avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
+        #Mean Z
+        z_values = voxel_features[:, :, self.z_idx_in_features] #[N_pillars, max_points]
+        masked_z_values = torch.where(arange, z_values, torch.zeros_like(z_values))
+        sum_z = masked_z_values.sum(dim=1) #[N_pillars]
+        batch_dict['pillar_mean_z'] = sum_z/valid_num_points.squeeze(1)
+        #Std Z
+        masked_z_sq_values = torch.where(arange, z_values**2, torch.zeros_like(z_values))
+        sum_z_sq = masked_z_sq_values.sum(dim=1) # [N_pillars]
+        mean_z_sq = sum_z_sq / valid_num_points.squeeze(-1)
+        batch_dict['pillar_std_z'] = torch.sqrt(torch.clamp(mean_z_sq - batch_dict['pillar_mean_z']**2, min=0))
 
-        pillar_occupancy = (voxel_num_points>0).float()
-        pillar_intensity = avg_intensity
-        vox_bev = torch.cat([pillar_occupancy, voxel_num_points, pillar_intensity], dim=1)
-        print("vox_bev的形状：",vox_bev.shape)
+        # Mean Intensity
+        if self.num_point_features > self.intensity_idx_in_features:  # Check if intensity is available
+            intensity_values = voxel_features[:, :, self.intensity_idx_in_features]  # [N_pillars, max_points]
+            masked_intensity_values = torch.where(arange, intensity_values, torch.zeros_like(intensity_values))
+            sum_intensity = masked_intensity_values.sum(dim=1)  # [N_pillars]
+            batch_dict['pillar_mean_intensity'] = sum_intensity / valid_num_points.squeeze(-1)
+        else:
+            # If intensity is not available, fill with zeros or a placeholder
+            batch_dict['pillar_mean_intensity'] = torch.zeros_like(sum_z)
+
+
+        # intensity_features = voxel_features[..., 3]
+        # avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
+        #
+        # pillar_occupancy = (voxel_num_points>0).float()
+        # pillar_intensity = avg_intensity
+        # vox_bev = torch.cat([pillar_occupancy, voxel_num_points, pillar_intensity], dim=1)
+        # print("vox_bev的形状：",vox_bev.shape)
 
         batch_dict['raw_points'] = {
             'features': voxel_features[..., :4],
