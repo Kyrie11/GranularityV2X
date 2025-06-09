@@ -90,7 +90,7 @@ class PillarVFE(nn.Module):
     def __init__(self, model_cfg, num_point_features, voxel_size,
                  point_cloud_range, grid_size):
         super().__init__()
-        self.grid_sizes = grid_sizes
+        self.grid_sizes = grid_size
         self.model_cfg = model_cfg
 
         self.use_norm = self.model_cfg['use_norm']
