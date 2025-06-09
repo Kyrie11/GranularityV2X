@@ -209,6 +209,7 @@ class PointPillarHow2comm(nn.Module):
             raw_voxel_coords_list.append(voxel_coords)
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
+            print("record_len:", record_len)
 
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
