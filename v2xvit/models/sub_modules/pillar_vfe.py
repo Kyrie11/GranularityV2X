@@ -6,6 +6,39 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class CustomPointScatter(nn.Module):
+    def __init__(self, grid_size, C_bev):
+        super().__init__()
+        self.nx, self.ny, self.nz = grid_size
+        assert self.nz == 1
+        self.C_bev = C_bev
+
+    def forward(self, point_features, voxel_coords):
+        '''
+        :param point_features: [N_pillars, N_points, C_point]
+        :param voxel_coords:   [N_pillars, 4] => [batch_idx, z, y, x]
+        :return:
+        '''
+
+        N_pillars, N_points, C_point = point_features.shape
+        B = voxel_coords[:, 0].max().item() + 1
+        H, W = self.ny, self.nx
+
+        #Step1:聚合每个pillar内部点的特征
+        pillar_bev_feat = point_features.mean(dim=1) #[N_pillars, C_point]
+        C_bev = pillar_bev_feat.shape[1]
+
+        #Step2:创建空的BEV特征图
+        spatial_features = torch.zeros((B, C_bev, H, W),
+                                       dtype=point_features.dtype,
+                                       device=point_features.device)
+
+        # Step 3: 将pillar特征scatter到对应位置
+        for i in range(N_pillars):
+            b, z, y, x = voxel_coords[i]
+            spatial_features[b, :, y, x] = pillar_bev_feat[i]
+
+        return spatial_features
 
 class PFNLayer(nn.Module):
     def __init__(self,
@@ -64,7 +97,6 @@ class PillarVFE(nn.Module):
 
         self.use_absolute_xyz = self.model_cfg['use_absolute_xyz']
         num_point_features += 6 if self.use_absolute_xyz else 3
-        self.num_point_features = num_point_features
         if self.with_distance:
             num_point_features += 1
 
@@ -89,11 +121,7 @@ class PillarVFE(nn.Module):
         self.y_offset = self.voxel_y / 2 + point_cloud_range[1]
         self.z_offset = self.voxel_z / 2 + point_cloud_range[2]
 
-        self.z_idx_in_features = 2
-        self.intensity_idx_in_features = 3
-        if self.num_point_features <= max(self.z_idx_in_features, self.intensity_idx_in_features):
-            print(f"Warning: num_point_features ({self.num_point_features}) is small. "
-                  f"Ensure z_idx ({self.z_idx_in_features}) and intensity_idx ({self.intensity_idx_in_features}) are correct.")
+
 
     def get_output_feature_dim(self):
         return self.num_filters[-1]
@@ -110,49 +138,10 @@ class PillarVFE(nn.Module):
         return paddings_indicator
 
     def forward(self, batch_dict):
+
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
-        print("voxel_features.shape=", voxel_features.shape)
-        valid_num_points = voxel_num_points.type_as(voxel_features).view(-1, 1) + 1e-6  # [N_pillars, 1]
-        max_points = voxel_features.shape[1]
-        arange = torch.arange(max_points, device=voxel_features.device)[None, :] < voxel_num_points[:, None]
-        # arange is [N_pillars, max_points], True for valid points
-
-        #Mean Z
-        z_values = voxel_features[:, :, self.z_idx_in_features] #[N_pillars, max_points]
-        masked_z_values = torch.where(arange, z_values, torch.zeros_like(z_values))
-        sum_z = masked_z_values.sum(dim=1) #[N_pillars]
-        batch_dict['pillar_mean_z'] = sum_z/valid_num_points.squeeze(1)
-        #Std Z
-        masked_z_sq_values = torch.where(arange, z_values**2, torch.zeros_like(z_values))
-        sum_z_sq = masked_z_sq_values.sum(dim=1) # [N_pillars]
-        mean_z_sq = sum_z_sq / valid_num_points.squeeze(-1)
-        batch_dict['pillar_std_z'] = torch.sqrt(torch.clamp(mean_z_sq - batch_dict['pillar_mean_z']**2, min=0))
-
-        # Mean Intensity
-        if self.num_point_features > self.intensity_idx_in_features:  # Check if intensity is available
-            intensity_values = voxel_features[:, :, self.intensity_idx_in_features]  # [N_pillars, max_points]
-            masked_intensity_values = torch.where(arange, intensity_values, torch.zeros_like(intensity_values))
-            sum_intensity = masked_intensity_values.sum(dim=1)  # [N_pillars]
-            batch_dict['pillar_mean_intensity'] = sum_intensity / valid_num_points.squeeze(-1)
-        else:
-            # If intensity is not available, fill with zeros or a placeholder
-            batch_dict['pillar_mean_intensity'] = torch.zeros_like(sum_z)
-
-
-        # intensity_features = voxel_features[..., 3]
-        # avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
-        #
-        # pillar_occupancy = (voxel_num_points>0).float()
-        # pillar_intensity = avg_intensity
-        # vox_bev = torch.cat([pillar_occupancy, voxel_num_points, pillar_intensity], dim=1)
-        # print("vox_bev的形状：",vox_bev.shape)
-
-        batch_dict['raw_points'] = {
-            'features': voxel_features[..., :4],
-            'coords': coords
-        }
         points_mean = \
             voxel_features[:, :, :3].sum(dim=1, keepdim=True) / \
             voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
@@ -179,7 +168,13 @@ class PillarVFE(nn.Module):
                                      keepdim=True)
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
-        print("没有经过pfn之前:", features.shape)
+
+        C = features.shape[2]
+        nx, ny, nz = self.model_cfg['grid_size']
+        scatter = CustomPointScatter(grid_size=(nx, ny, nz), C_bev=C)
+        bev_feat = scatter(features, coords)
+        print("bev_feat.shape:", bev_feat.shape)
+
         voxel_count = features.shape[1]
         mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
                                            axis=0)
@@ -189,5 +184,4 @@ class PillarVFE(nn.Module):
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
-        print("pillar features:", features.shape)
         return batch_dict
