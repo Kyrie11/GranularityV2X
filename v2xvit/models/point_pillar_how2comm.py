@@ -21,13 +21,12 @@ class PointPillarHow2comm(nn.Module):
         super(PointPillarHow2comm, self).__init__()
 
         nx, ny, nz = args['point_pillar_scatter']['grid_size']
-        grid_sizes = [nx, ny, nz]
-        print(grid_sizes)
+        grid_size = [nx, ny, nz]
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
-                                    grid_sizes=grid_sizes,
                                     num_point_features=4,
                                     voxel_size=args['voxel_size'],
-                                    point_cloud_range=args['lidar_range'])
+                                    point_cloud_range=args['lidar_range'],
+                                    grid_size=grid_size)
         self.scatter = PointPillarScatter(args['point_pillar_scatter'])
 
         if 'resnet' in args['base_bev_backbone']:

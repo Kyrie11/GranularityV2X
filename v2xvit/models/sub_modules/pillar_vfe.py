@@ -87,8 +87,8 @@ class PFNLayer(nn.Module):
 
 
 class PillarVFE(nn.Module):
-    def __init__(self, grid_sizes, model_cfg, num_point_features, voxel_size,
-                 point_cloud_range):
+    def __init__(self, model_cfg, num_point_features, voxel_size,
+                 point_cloud_range, grid_sizes):
         super().__init__()
         self.grid_sizes = grid_sizes
         self.model_cfg = model_cfg
