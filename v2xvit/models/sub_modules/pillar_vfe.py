@@ -174,12 +174,11 @@ class PillarVFE(nn.Module):
                                      keepdim=True)
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
-        print("features.shape:", features.shape)
 
         C = features.shape[2]
         scatter = CustomPointScatter(grid_size=(self.nx, self.ny, self.nz), C_bev=C)
-        bev_feat = scatter(features, coords)
-        print("bev_feat.shape:", bev_feat.shape)
+        vox_bev = scatter(features, coords)
+        batch_dict['vox_bev'] = vox_bev
 
         voxel_count = features.shape[1]
         mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
