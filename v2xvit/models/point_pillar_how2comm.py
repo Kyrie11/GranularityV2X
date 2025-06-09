@@ -149,7 +149,7 @@ class PointPillarHow2comm(nn.Module):
 
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
-        det_bev = torch.cat([psm_single, rm_single], dim=1)
+        det_bev = torch.cat([psm_single, rm_single], dim=0)
         print("det_bev.shape:", det_bev.shape)
         print("psm_single.shape:", psm_single.shape)
         print("rm_single.shape:", rm_single.shape)
