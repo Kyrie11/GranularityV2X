@@ -152,11 +152,9 @@ class PointPillarHow2comm(nn.Module):
         rm_single = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
-        print("vox_bev.shape:", vox_bev.shape)
-        print("psm_single.shape:", psm_single.shape)
-        print("rm_single.shape:", rm_single.shape)
         det_bev = torch.cat([psm_single, rm_single], dim=1)
-        print("det_bev.shape:", det_bev.shape)
+        fused_bev = torch.cat([vox_bev, spatial_features, det_bev], dim=1)
+        print("fused_bev.shape:", fused_bev.shape)
 
 
 
