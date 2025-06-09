@@ -22,7 +22,7 @@ class CustomPointScatter(nn.Module):
 
         N_pillars, N_points, C_point = point_features.shape
         B = voxel_coords[:, 0].max().item() + 1
-        H, W = self.ny, self.nx
+        H, W = int(self.ny), int(self.nx)
 
         #Step1:聚合每个pillar内部点的特征
         pillar_bev_feat = point_features.mean(dim=1) #[N_pillars, C_point]
