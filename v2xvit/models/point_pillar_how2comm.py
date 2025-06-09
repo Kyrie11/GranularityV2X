@@ -144,8 +144,8 @@ class PointPillarHow2comm(nn.Module):
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
-        psm_single = self.cls_head(spatial_features)
-        rm_single = self.reg_head(spatial_features)
+        psm_single = self.cls_head(spatial_features_2d)
+        rm_single = self.reg_head(spatial_features_2d)
 
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
