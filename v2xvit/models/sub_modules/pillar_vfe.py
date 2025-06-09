@@ -188,4 +188,5 @@ class PillarVFE(nn.Module):
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
+        print("pillar features:", features.shape)
         return batch_dict
