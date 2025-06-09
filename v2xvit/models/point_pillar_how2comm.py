@@ -144,14 +144,16 @@ class PointPillarHow2comm(nn.Module):
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
-        psm_single = self.cls_head(spatial_features_2d)
-        rm_single = self.reg_head(spatial_features_2d)
+        psm_single = self.cls_head(spatial_features)
+        rm_single = self.reg_head(spatial_features)
 
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
-        print("vox_bev.shape:", vox_bev.shape)
+        det_bev = torch.cat([psm_single, rm_single], dim=1)
+        print("det_bev.shape:", det_bev.shape)
         print("psm_single.shape:", psm_single.shape)
-        print("spatial features.shape:", spatial_features.shape)
+        print("rm_single.shape:", rm_single.shape)
+        print("vox_bev.shape:", vox_bev.shape)
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
