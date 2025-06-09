@@ -1,6 +1,7 @@
+from dask.array.routines import aligned_coarsen_chunks
 from numpy import record
 import torch.nn as nn
-
+import torch.nn.functional as F
 from v2xvit.models.sub_modules.pillar_vfe import PillarVFE
 from v2xvit.models.sub_modules.point_pillar_scatter import PointPillarScatter
 from v2xvit.models.sub_modules.base_bev_backbone import BaseBEVBackbone
@@ -147,12 +148,15 @@ class PointPillarHow2comm(nn.Module):
         psm_single = self.cls_head(spatial_features_2d)
         rm_single = self.reg_head(spatial_features_2d)
 
+        target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
+        psm_single= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
+        rm_single = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
         #得到三个粒度的bev
         vox_bev = batch_dict['vox_bev']
         print("vox_bev.shape:", vox_bev.shape)
         print("psm_single.shape:", psm_single.shape)
         print("rm_single.shape:", rm_single.shape)
-        det_bev = torch.cat([psm_single, rm_single], dim=0)
+        det_bev = torch.cat([psm_single, rm_single], dim=1)
         print("det_bev.shape:", det_bev.shape)
 
 
