@@ -10,6 +10,7 @@ class PointPillarScatter(nn.Module):
         self.num_bev_features = self.model_cfg['num_features']
         self.nx, self.ny, self.nz = model_cfg['grid_size']
         print("nx in scatter:", self.nx)
+        print("ny in scatter:", self.ny)
         assert self.nz == 1
 
     def forward(self, batch_dict):
