@@ -65,8 +65,8 @@ class PointPillarHow2comm(nn.Module):
         # 通道1: 对应最高置信度的类别ID (整数)
         # (可选) 通道2-8: 对应最高置信度anchor的7个回归参数
         self.C_D = 2 + 7
-        self.num_classes = args['num_class']  # 获取类别数
-        self.num_anchors_per_loc = args['anchor_number']  # 获取每个位置的anchor数
+        # self.num_classes = args['num_class']  # 获取类别数
+        # self.num_anchors_per_loc = args['anchor_number']  # 获取每个位置的anchor数
 
         if args['backbone_fix']:
             self.backbone_fix()
