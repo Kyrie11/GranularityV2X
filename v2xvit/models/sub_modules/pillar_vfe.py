@@ -64,6 +64,7 @@ class PillarVFE(nn.Module):
 
         self.use_absolute_xyz = self.model_cfg['use_absolute_xyz']
         num_point_features += 6 if self.use_absolute_xyz else 3
+        self.num_point_features = num_point_features
         if self.with_distance:
             num_point_features += 1
 
