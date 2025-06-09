@@ -276,7 +276,7 @@ class How2comm(nn.Module):
                                 pairwise_t_matrix_4d
                             )
                             voxel_bev = torch.stack(voxel_bev, dim=0)
-                            print("voxel_bev的形状是:", voxel_bev.shape)
+                            print("voxel_bev的形状是:", voxel_bev)
                             # 多模态特征融合
                             print('x.shape=', x.shape, ", voxel_bev.shape=", voxel_bev.shape)
                             x = torch.cat([x, voxel_bev], dim=1)

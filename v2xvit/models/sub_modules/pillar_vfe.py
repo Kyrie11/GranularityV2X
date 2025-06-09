@@ -107,6 +107,15 @@ class PillarVFE(nn.Module):
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
 
+        intensity_features = voxel_features[..., 3]
+        avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
+
+        pillar_occupancy = (voxel_num_points>0).float()
+        pillar_pointnum = voxel_num_points.point()
+        pillar_intensity = avg_intensity
+        vox_bev = torch.cat([pillar_occupancy, pillar_pointnum, pillar_intensity], dim=1)
+        print("vox_bev的形状：",vox_bev.shape)
+
         batch_dict['raw_points'] = {
             'features': voxel_features[..., :4],
             'coords': coords
