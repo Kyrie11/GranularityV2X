@@ -191,6 +191,7 @@ class PointPillarHow2comm(nn.Module):
 
         raw_voxel_features_list = []
         raw_voxel_coords_list = []
+        print("data_dict_list长度：", len(data_dict_list))
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features'].clone()
@@ -251,7 +252,6 @@ class PointPillarHow2comm(nn.Module):
             F_feat_bev_agent = spatial_features_2d
 
         psm_single = self.cls_head(spatial_features_2d) #分类预测图 [batch_size, anchors, H, W]
-        print("psm_single形状：", psm_single.shape)
         rm_single = self.reg_head(spatial_features_2d)  #回归预测图 [batch_size, anchors * cls_num, H, W]
         det_bev = torch.cat([psm_single, rm_single], dim=0)
         print("det_bev的形状：", det_bev.shape)
