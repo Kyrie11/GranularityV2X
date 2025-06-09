@@ -122,7 +122,7 @@ class PillarVFE(nn.Module):
         self.z_offset = self.voxel_z / 2 + point_cloud_range[2]
 
         nx = point_cloud_range[0] / self.voxel_x
-        print("nx:", nx)
+        print("nx in pillarvfe :", nx)
 
     def get_output_feature_dim(self):
         return self.num_filters[-1]
