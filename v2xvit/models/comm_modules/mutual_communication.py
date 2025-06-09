@@ -250,7 +250,7 @@ class Communication(nn.Module):
                 C, H, W = sparse_points_mask.shape
 
                 x_idx = (agent_coords[:, 3] / self.discrete_ratio).long().clamp(0, W - 1)  # [K]
-                y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]
+                y_idx = (agent_coords[:, 2] / self.discrete_ratio).long().clamp(0, H - 1)  # [K]bbsbb
 
                 # ==== 生成三维掩码索引 ====
                 voxel_mask = sparse_points_mask[:, y_idx, x_idx].sum(dim=0) > sparse_points_mask.shape[0]/4
