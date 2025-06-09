@@ -148,7 +148,15 @@ class PointPillarHow2comm(nn.Module):
 
         return F_det_bev
 
+    def generate_vox_bev(self, batch_size, batch_dict, target_H, target_W):
+        pillar_bev_coords_orig = batch_dict['voxel_coords'][:, [0,2,3]].long()# (b, y_vox_grid, x_vox_grid)
 
+        valid_y_mask = (pillar_bev_coords_orig[:, 1] >= 0) & (pillar_bev_coords_orig[:, 1] < target_H)
+        valid_x_mask = (pillar_bev_coords_orig[:, 2] >= 0) & (pillar_bev_coords_orig[:, 2] < target_W)
+        valid_mask = valid_y_mask & valid_x_mask
+        pillar_bev_coords = pillar_bev_coords_orig[valid_mask]
+
+        num_points_per_pillar = batch_dict['voxel_num_points']
 
 
     def backbone_fix(self):
@@ -195,12 +203,12 @@ class PointPillarHow2comm(nn.Module):
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features'].clone()
+            print("voxel_features的shape", voxel_features.shape)
             raw_voxel_features_list.append(voxel_features)
             voxel_coords = data_dict['processed_lidar']['voxel_coords'].clone()
             raw_voxel_coords_list.append(voxel_coords)
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
-            print(record_len.shape)
 
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
@@ -244,13 +252,6 @@ class PointPillarHow2comm(nn.Module):
         record_len = batch_dict['record_len']
 
         target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-
-        if spatial_features.shape[2] != target_H or spatial_features.shape[3] != target_W:
-            F_feat_bev_agent = F.interpolate(spatial_features_2d,
-                                             size=(target_H, target_W),
-                                             mode='bilinear', align_corners=False)
-        else:
-            F_feat_bev_agent = spatial_features_2d
 
         psm_single = self.cls_head(spatial_features_2d) #分类预测图 [batch_size, anchors, H, W]
         rm_single = self.reg_head(spatial_features_2d)  #回归预测图 [batch_size, anchors * cls_num, H, W]
