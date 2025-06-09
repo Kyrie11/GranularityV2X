@@ -113,9 +113,9 @@ class PillarVFE(nn.Module):
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
-        print("voxel_features:", voxel_features)
         valid_num_points = voxel_num_points.type_as(voxel_features).view(-1, 1) + 1e-6  # [N_pillars, 1]
         max_points = voxel_features.shape[1]
+        print("max_points:", max_points)
 
         intensity_features = voxel_features[..., 3]
         avg_intensity = (intensity_features.sum(dim=1)/voxel_num_points.type_as(intensity_features).view(-1,1))
