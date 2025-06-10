@@ -244,10 +244,15 @@ class How2comm(nn.Module):
                         batch_temp_features_his = self.regroup(his, record_len)
 
                         batch_vox_features = self.regroup(vox_bev, record_len)
-                        batch_vox_features_his = self.regroup()
+                        batch_vox_features_his = self.regroup(his_vox, record_len)
+                        batch_det_features = self.regroup(det_bev, record_len)
+                        batch_det_features_his = self.regroup(his_det, record_len)
+
                         temp_list = []
                         temp_psm_list = []
                         history_list = []
+                        history_vox_list = []
+                        history_det_list = []
                         for b in range(B):
                             N = record_len[b]
                             t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
@@ -259,6 +264,20 @@ class How2comm(nn.Module):
                                                                   (H, W)) 
                             temp_list.append(neighbor_feature)
 
+                            #添加vox和det信息
+                            temp_vox = batch_vox_features[b]
+                            neighbor_vox = warp_affine_simple(temp_vox,
+                                                              t_matrix[0,
+                                                              :, :, :],
+                                                              (H, W))
+                            temp_det = batch_det_features[b]
+                            neighbor_det = warp_affine_simple(temp_det,
+                                                              t_matrix[0,
+                                                              :, :, :],
+                                                              (H, W))
+
+
+
                             temp_features_his = batch_temp_features_his[b]
                             C, H, W = temp_features_his.shape[1:]
                             neighbor_feature_his = warp_affine_simple(temp_features_his,
@@ -268,7 +287,27 @@ class How2comm(nn.Module):
                             history_list.append(neighbor_feature_his)
                             
                             temp_psm_list.append(warp_affine_simple(confidence_maps[b], t_matrix[0, :, :, :], (H, W)))  
+
+                            #添加vox和det历史信息
+                            temp_vox_his = batch_vox_features_his[b]
+                            C,H,W = temp_vox_his.shape[1:]
+                            neighbor_vox_his = warp_affine_simple(temp_vox_his,
+                                                                  t_matrix[0,
+                                                                  :, :, :],
+                                                                  (H, W))
+                            history_vox_list.append(neighbor_vox_his)
+
+                            temp_det_his = batch_det_features_his[b]
+                            C,H,W = temp_det_his.shape[1:]
+                            neighbor_det_his = warp_affine_simple(temp_det_his,
+                                                                  t_matrix[0,
+                                                                  :, :, :],
+                                                                  (H, W))
+                            history_det_list.append(neighbor_det_his)
+
+
                         x = torch.cat(temp_list, dim=0)
+                        print("torch.cat(dim=0)以后的shape:", x.shape)
                         his = torch.cat(history_list, dim=0)
                         if self.communication_flag:
                             sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
