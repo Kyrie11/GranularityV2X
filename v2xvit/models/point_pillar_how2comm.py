@@ -94,6 +94,8 @@ class PointPillarHow2comm(nn.Module):
         matrix_list = []
         regroup_feature_list = []
         regroup_feature_list_large = []
+        regroup_vox_list = []
+        regroup_det_list = []
 
 
         for origin_data in data_dict_list:
@@ -137,6 +139,21 @@ class PointPillarHow2comm(nn.Module):
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
 
+            vox_bev = batch_dict['vox_bev']
+            regroup_vox_list.append(self.regroup(vox_bev, record_len))
+            psm = self.cls_head(spatial_features_2d)
+            rm = self.reg_head(spatial_features_2d)
+            target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
+            psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
+            rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
+            det_bev = torch.cat([psm, rm], dim=1)
+            regroup_det_list.append(self.regroup(det_bev, record_len))
+
+        print("regroup_feature_list的shape:", regroup_feature_list[0].shape)
+        print("regroup_vox_list的shape:", regroup_vox_list[0].shape)
+        print("regroup_det_list的shape:", regroup_det_list[0].shape)
+
+
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
@@ -154,17 +171,18 @@ class PointPillarHow2comm(nn.Module):
         vox_bev = batch_dict['vox_bev']
         det_bev = torch.cat([psm_single, rm_single], dim=1)
         fused_bev = torch.cat([vox_bev, spatial_features, det_bev], dim=1)
+
         print("fused_bev.shape:", fused_bev.shape)
 
 
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                spatial_features, psm_single, record_len, pairwise_t_matrix, self.backbone,
+                vox_bev, spatial_features, det_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
                 [self.shrink_conv, self.cls_head, self.reg_head])
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                spatial_features, psm_single, record_len, pairwise_t_matrix, self.backbone,
+                vox_bev, spatial_features, det_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
                 [self.shrink_conv, self.cls_head, self.reg_head], history=history_feature)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)

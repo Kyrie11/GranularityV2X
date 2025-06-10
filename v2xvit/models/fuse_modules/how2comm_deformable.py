@@ -194,8 +194,9 @@ class How2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, x, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
-        _, C, H, W = x.shape
+    def forward(self, vox_bev, spatial_features, det_bev, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
+        x = spatial_features
+        _, _, H, W = x.shape
         pairwise_t_matrix_4d = pairwise_t_matrix
         B, L = pairwise_t_matrix.shape[:2]
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
@@ -240,6 +241,9 @@ class How2comm(nn.Module):
                         
                         batch_temp_features = self.regroup(x, record_len)
                         batch_temp_features_his = self.regroup(his, record_len)
+
+                        batch_vox_features = self.regroup(vox_bev, record_len)
+                        batch_vox_features_his = self.regroup()
                         temp_list = []
                         temp_psm_list = []
                         history_list = []
