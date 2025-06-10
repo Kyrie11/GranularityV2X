@@ -158,7 +158,7 @@ class How2comm(nn.Module):
         self.communication_flag = args['communication_flag']
         self.discrete_ratio = args['voxel_size'][0]  
         self.downsample_rate = args['downsample_rate']
-        self.async_flag = True
+        self.async_flag = False
         self.channel_fuse = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=7, stride=1, padding=3)
 
         self.agg_mode = args['agg_operator']['mode']
