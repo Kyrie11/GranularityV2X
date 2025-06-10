@@ -46,10 +46,12 @@ class How2commPreprocess(nn.Module):
 
         return warped_feats
 
-    def communication(self, feats, record_len, history_list, confidence_map_list, raw_voxels, raw_coords):
+    def communication(self, vox_bev,feats,det_bev,record_len,history_vox_list,history_list,history_det_list,confidence_map_list):
+        vox_list = self.regroup(vox_bev, record_len)
         feat_list = self.regroup(feats, record_len)
+        det_list = self.regroup(det_bev, record_len)
         sparse_feat_list, commu_loss, commu_rate, sparse_mask, sparse_voxels, sparse_coords = self.commu_module(
-            feat_list,confidence_map_list,raw_voxels, raw_coords)
+            feat_list,confidence_map_list)
         sparse_feats = torch.cat(sparse_feat_list, dim=0)
         sparse_history_list = []
         for i in range(len(sparse_feat_list)):
