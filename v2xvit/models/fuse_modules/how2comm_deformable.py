@@ -249,6 +249,8 @@ class How2comm(nn.Module):
                         batch_det_features_his = self.regroup(his_det, record_len)
 
                         temp_list = []
+                        temp_vox_list = []
+                        temp_det_list = []
                         temp_psm_list = []
                         history_list = []
                         history_vox_list = []
@@ -270,12 +272,14 @@ class How2comm(nn.Module):
                                                               t_matrix[0,
                                                               :, :, :],
                                                               (H, W))
+                            temp_vox_list.append(neighbor_vox)
+
                             temp_det = batch_det_features[b]
                             neighbor_det = warp_affine_simple(temp_det,
                                                               t_matrix[0,
                                                               :, :, :],
                                                               (H, W))
-
+                            temp_det_list.append(neighbor_det)
 
 
                             temp_features_his = batch_temp_features_his[b]
@@ -307,8 +311,14 @@ class How2comm(nn.Module):
 
 
                         x = torch.cat(temp_list, dim=0)
-                        print("torch.cat(dim=0)以后的shape:", x.shape)
+                        vox_bev = torch.cat(temp_vox_list, dim=0)
+                        det_bev = torch.cat(temp_det_list, dim=0)
+
                         his = torch.cat(history_list, dim=0)
+                        print("his.shape=", his.shape)
+                        print("history_list.shape=", history_list.shape)
+                        his_vox = torch.cat(history_vox_list, dim=0)
+                        his_det = torch.cat(history_det_list, dim=0)
                         if self.communication_flag:
                             sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
                             x, record_len,history_list,temp_psm_list, raw_voxels, raw_coords)
