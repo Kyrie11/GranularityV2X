@@ -224,7 +224,8 @@ class How2comm(nn.Module):
             ups_temporal = []
             ups_exclusive = []
             ups_common = []
-            with_resnet = True if hasattr(backbone, 'resnet') else False  
+            with_resnet = True if hasattr(backbone, 'resnet') else False
+            print("his.shape=", his.shape)
             if with_resnet:
                 feats = backbone.resnet(x)
                 history_feats = backbone.resnet(his)
