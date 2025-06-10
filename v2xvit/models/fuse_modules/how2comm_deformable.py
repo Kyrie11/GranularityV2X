@@ -219,7 +219,7 @@ class How2comm(nn.Module):
             his_vox, his, his_det = history
         else:
             his_vox, his, his_det = vox_bev, x, det_bev
-
+        print("his.shape=", his.shape)
         if self.multi_scale:
             ups = []
             ups_temporal = []
