@@ -216,7 +216,7 @@ class How2comm(nn.Module):
             offset_loss = torch.zeros(1).to(x.device)
         neighbor_psm_list = []
         if history:
-            his_vox, his, his_det = history
+            his_vox, his, his_det = history[0],history[1],history[2]
         else:
             his_vox, his, his_det = vox_bev, x, det_bev
         print("his.shape=", his.shape)
