@@ -167,9 +167,10 @@ class PointPillarHow2comm(nn.Module):
         upsampled_psm= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
         upsampled_rm = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
         #得到三个粒度的bev
-        vox_bev = batch_dict['vox_bev']
+        vox_bev = torch.tensor(batch_dict['vox_bev'])
         det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
         fused_bev = torch.cat([vox_bev, spatial_features, det_bev], dim=1)
+        fused_his = [history_vox, history_feature, history_det]
 
 
 
@@ -180,7 +181,7 @@ class PointPillarHow2comm(nn.Module):
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
                 [vox_bev, spatial_features, det_bev], psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head], history=[history_vox, history_feature, history_det])
+                [self.shrink_conv, self.cls_head, self.reg_head], history=fused_his)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
