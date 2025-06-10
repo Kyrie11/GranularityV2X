@@ -51,7 +51,7 @@ class How2commPreprocess(nn.Module):
         feat_list = self.regroup(feats, record_len)
         det_list = self.regroup(det_bev, record_len)
         sparse_feat_list, commu_loss, commu_rate, sparse_mask, sparse_voxels, sparse_coords = self.commu_module(
-            feat_list,confidence_map_list)
+            vox_list,feat_list,det_list,confidence_map_list)
         sparse_feats = torch.cat(sparse_feat_list, dim=0)
         sparse_history_list = []
         for i in range(len(sparse_feat_list)):
