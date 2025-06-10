@@ -149,9 +149,9 @@ class PointPillarHow2comm(nn.Module):
             det_bev = torch.cat([psm, rm], dim=1)
             regroup_det_list.append(self.regroup(det_bev, record_len))
 
-        print("regroup_feature_list的shape:", regroup_feature_list[0].shape)
-        print("regroup_vox_list的shape:", regroup_vox_list[0].shape)
-        print("regroup_det_list的shape:", regroup_det_list[0].shape)
+        print("regroup_feature_list的shape:", len(regroup_feature_list[0]))
+        print("regroup_vox_list的shape:", len(regroup_vox_list[0]))
+        print("regroup_det_list的shape:", len(regroup_det_list[0]))
 
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
