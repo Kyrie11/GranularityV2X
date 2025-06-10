@@ -58,20 +58,33 @@ class How2commPreprocess(nn.Module):
         sparse_history = torch.cat(sparse_history_list, dim=0)
         return sparse_feats, commu_loss, commu_rate, sparse_history, sparse_voxels, sparse_coords
 
-    def forward(self, feat_curr, feat_history, record_len, backbone=None, heads=None):
+    def forward(self, fused_curr, fused_history, record_len, backbone=None, heads=None):
+        vox_curr, feat_curr, det_curr = fused_curr
+        vox_curr = self.regroup(vox_curr, record_len)
         feat_curr = self.regroup(feat_curr, record_len)
-        B = len(feat_curr)
-        feat_list = [[] for _ in range(B)]
-        for bs in range(B):
-            feat_list[bs] += [feat_curr[bs], feat_history[bs]]
+        det_curr = self.regroup(det_curr, record_len)
 
+        vox_history, feat_history, det_history = fused_history
+
+        B = len(feat_curr)
+        vox_list = [[] for _ in range(B)]
+        feat_list = [[] for _ in range(B)]
+        det_list = [[] for _ in range(B)]
+        for bs in range(B):
+            vox_list[bs] += [vox_curr[bs], vox_history[bs]]
+            feat_list[bs] += [feat_curr[bs], feat_history[bs]]
+            det_list[bs] += [det_curr[bs], det_history[bs]]
+
+        fused_list = [vox_list, feat_list, det_list]
         if self.flow_flag:
-            feat_final, offset_loss = self.flow(feat_list)
+            feat_final, offset_loss = self.flow(fused_list)
         else:
             offset_loss = torch.zeros(1).to(record_len.device)
             x_list = []
             for bs in range(B):
-                delayed_colla_feat = feat_list[bs][self.delay][1:]  
+                delayed_colla_vox = vox_list[bs][self.delay][1:]
+                delayed_colla_feat = feat_list[bs][self.delay][1:]
+                delayed_colla_det = det_list[bs][self.delay][1:]
                 ego_feat = feat_list[bs][0][:1]  
                 x_list.append(
                     torch.cat([ego_feat, delayed_colla_feat], dim=0))

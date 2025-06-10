@@ -194,8 +194,8 @@ class How2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, vox_bev, spatial_features, det_bev, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
-        x = spatial_features
+    def forward(self, fused_bev, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, raw_voxels=None, raw_coords=None):
+        vox_bev, x, det_bev = fused_bev
         _, _, H, W = x.shape
         pairwise_t_matrix_4d = pairwise_t_matrix
         B, L = pairwise_t_matrix.shape[:2]
@@ -210,15 +210,15 @@ class How2comm(nn.Module):
 
 
         if history and self.async_flag: 
-            feat_final, offset_loss = self.how2comm(x, history, record_len, backbone, heads)
+            feat_final, offset_loss = self.how2comm(fused_bev, history, record_len, backbone, heads)
             x = feat_final
         else:
             offset_loss = torch.zeros(1).to(x.device)
         neighbor_psm_list = []
         if history:
-            his = history[0]
+            his_vox, his, his_det = history
         else:
-            his = x
+            his_vox, his, his_det = vox_bev, x, det_bev
 
         if self.multi_scale:
             ups = []
@@ -233,6 +233,7 @@ class How2comm(nn.Module):
             for i in range(self.num_levels):
                 x = feats[i] if with_resnet else backbone.blocks[i](x)
                 his = history_feats[i] if with_resnet else backbone.blocks[i](his)
+                print("在resnet后feat的大小为:", x.shape)
 
                 if i == 0:
                     if self.communication:
