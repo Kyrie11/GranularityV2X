@@ -132,6 +132,9 @@ class Communication(nn.Module):
             print("agent_feature.shape=",agent_feature.shape)
             print("agent_det.shape=", agent_det.shape)
             cav_num, C, H, W = agent_feature.shape
+
+            fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
+            print("fused_bev.shape=",fused_bev.shape)
             if cav_num == 1:
                 send_feats.append(agent_feature)
                 ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
