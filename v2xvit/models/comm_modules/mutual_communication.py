@@ -233,7 +233,7 @@ class Communication(nn.Module):
             #         1 - agent_channel_attention[0,]).unsqueeze(0)
             ego_spatial_request = (
                     1 - agent_spatial_attention[0,]).unsqueeze(0)
-            print("ego_spatial_request.shape=",ego_spatial_request.shapes)
+            print("ego_spatial_request.shape=",ego_spatial_request.shape)
             ego_semantic_request = (
                     agent_semantic_attention[0,]).unsqueeze(0)
             print("ego_semantic_request.shape=", ego_semantic_request.shape)
