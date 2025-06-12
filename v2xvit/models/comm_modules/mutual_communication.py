@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 import torch.optim as optim
 import random
-
+from v2xvit.models.comm_modules.utility_network import UtilityNetwork
 
 # class Channel_Request_Attention(nn.Module):
 #     def __init__(self, in_planes, ratio=16):
@@ -141,6 +141,9 @@ class Communication(nn.Module):
         self.granularity_request = Granularity_Request_Attention(90)
         self.channel_fusion = nn.Conv2d(in_planes * 2, in_planes, 1, bias=False)
         self.spatial_fusion = nn.Conv2d(2, 1, 1, bias=False)
+        self.granularity_fusion = nn.Linear(3+3, 3) # R_C_ego (3) + A_C_collab (3) -> X_C (3)
+        self.semantic_channel = 16
+        self.semantic_fusion = nn.Linear(2*self.semantic_channel, self.semantic_channel)
         self.statisticsNetwork = StatisticsNetwork(in_planes * 2)
         self.mutual_loss = DeepInfoMaxLoss()
         self.request_flag = args['request_flag']
@@ -162,6 +165,18 @@ class Communication(nn.Module):
         d1_gaussian_filter /= d1_gaussian_filter.sum()
 
         self.d1_gaussian_filter = d1_gaussian_filter.view(1, 1, kernel_size).cuda()
+
+        #效益网络
+        self.utility_net =UtilityNetwork(collab_bev_channels=90,
+            spatial_coeff_channels=1, # X_S 的通道数
+            granularity_coeff_dim=3,  # X_C 的维度
+            semantic_coeff_dim=self.semantic_channel, # X_G 的维度
+            bandwidth_vector_dim=3)
+
+        #每个粒度的带宽成本
+        self.B_vox = torch.tensor(args["bandwidth_vox"])
+        self.B_feat = torch.tensor(args["bandwidth_feat"])
+        self.B_det = torch.tensor(args["bandwidth_det"])
 
     def init_gaussian_filter(self, k_size=5, sigma=1):
         def _gen_gaussian_kernel(k_size=5, sigma=1):
@@ -189,13 +204,10 @@ class Communication(nn.Module):
             agent_feature = feat_list[bs]
             agent_det = det_list[bs]
             agent_fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
-            print("agent_fused_bev.shape=", agent_fused_bev.shape)
-            print("agent_feature.shape=", agent_feature.shape)
-            print("agent_vox.shape=", agent_vox.shape)
             cav_num, C, H, W = agent_feature.shape
 
-            fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
             if cav_num == 1:
+                all_agents_sparse_transmitted_data.append(agent_fused_bev)
                 send_feats.append(agent_feature)
                 ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
                 sparse_mask_list.append(ones_mask)
@@ -207,13 +219,12 @@ class Communication(nn.Module):
             # agent_channel_attention = self.channel_request(
             #     agent_feature)
             agent_spatial_attention = self.spatial_request(
-                fused_bev)
+                agent_fused_bev)
             agent_semantic_attention = self.semantic_request(
-                fused_bev
-            )
+                agent_fused_bev)
             agent_granularity_attention = self.granularity_request(
-                fused_bev
-            )
+                agent_fused_bev)
+
             agent_activation = torch.mean(agent_feature, dim=1, keepdims=True).sigmoid()
             agent_activation = self.gaussian_filter(agent_activation)
 
@@ -223,6 +234,7 @@ class Communication(nn.Module):
                     1 - agent_spatial_attention[0,]).unsqueeze(0)
             ego_semantic_request = (
                     agent_semantic_attention[0,]).unsqueeze(0)
+            print("ego_semantic_request.shape=", ego_semantic_request.shape)
             ego_granularity_request = (
                     1 - agent_granularity_attention[0,]).unsqueeze(0)
 
@@ -233,9 +245,9 @@ class Communication(nn.Module):
                     #     [ego_channel_request, agent_channel_attention[i + 1,].unsqueeze(0)], dim=1))
                     spatial_coefficient = self.spatial_fusion(torch.cat(
                         [ego_spatial_request, agent_spatial_attention[i + 1,].unsqueeze(0)], dim=1))
-                    semantic_coefficient = self.semantic_request(torch.cat(
+                    semantic_coefficient = self.semantic_fusion(torch.cat(
                         [ego_semantic_request, agent_semantic_attention[i+1,].unsqueeze(0)], dim=1))
-                    granularity_coefficient = self.granularity_request(torch.cat(
+                    granularity_coefficient = self.granularity_fusion(torch.cat(
                         [ego_granularity_request, agent_granularity_attention[i+1,].unsqueeze(0)],dim=1))
                 else:
                     # channel_coefficient = agent_channel_attention[i + 1,].unsqueeze(
@@ -248,12 +260,36 @@ class Communication(nn.Module):
                         0)
 
                 spatial_coefficient = spatial_coefficient.sigmoid()
-                # channel_coefficient = channel_coefficient.sigmoid()
                 semantic_coefficient = semantic_coefficient.sigmoid()
                 granularity_coefficient = granularity_coefficient.sigmoid()
-                # smoth_channel_coefficient = F.conv1d(channel_coefficient.reshape(1, 1, C), self.d1_gaussian_filter,
-                #                                      padding=(self.kernel_size - 1) // 2)
-                # channel_coefficient = smoth_channel_coefficient.reshape(1, C, 1, 1)
+
+                #调用效益网络计算sparse_matrix
+                utility_map = self.utility_net(agent_fused_bev[i+1],
+                                               spatial_coefficient,
+                                               granularity_coefficient,
+                                               semantic_coefficient,
+                                               bandwidth_vector)
+
+                #得到选择传输的数据
+                selected_granularity_indices = self.selection_mechanism(utility_map_collab, bandwidth_budget)
+                #构建稀疏传输数据 f_collab_trans(BEV图)
+                f_collab_trans = torch.zeros_like(agent_fused_bev[0])
+                for r_y in range(H):
+                    for r_x in range(W):
+                        selected_g_idx = selected_granularity_indices[r_y, r_x]
+                        if selected_g_idx == 0:#Voxel
+                            f_collab_trans[0, 0:10, r_y, r_x] = agent_vox[i+1, :, r_y, r_x]
+                        elif selected_g_idx == 1:#Feat
+                            f_collab_trans[0, 10:74, r_y, r_x] = agent_feature[i+1, :, r_y, r_x]
+                        elif selected_g_idx == 2:#Detection
+                            f_collab_trans[0, 74:90, r_y, r_x] = agent_det[i+1, :, r_y, r_x]
+
+                all_agents_sparse_transmitted_data.append(f_collab_trans)
+                #计算Best-Granularity-Selection的损失
+                target_utility = self.calculate_target_utility(agent_fused_bev[i+1], )
+                Loss_utility_pred = F.mse_loss(utility_map_collab, target_utility)
+                Loss_recon = self.reconstruction(f_collab_trans, agent_fused_bev[i+1])
+                Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
 
                 spatial_coefficient = self.gaussian_filter(spatial_coefficient)
                 sparse_matrix = channel_coefficient * spatial_coefficient
@@ -284,6 +320,7 @@ class Communication(nn.Module):
                     [collaborator_feature, agent_feature[i + 1,].unsqueeze(0) * sparse_mask], dim=0)
                 sparse_batch_mask = torch.cat(
                     [sparse_batch_mask, sparse_mask], dim=0)
+
 
             org_feature = agent_feature.clone()
             sparse_feature = torch.cat(
