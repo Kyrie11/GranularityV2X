@@ -222,6 +222,7 @@ class Communication(nn.Module):
                 agent_fused_bev)
             agent_semantic_attention = self.semantic_request(
                 agent_fused_bev)
+            print("agent_semantic_attention.shape=", agent_semantic_attention.shape)
             agent_granularity_attention = self.granularity_request(
                 agent_fused_bev)
 
