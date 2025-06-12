@@ -6,22 +6,79 @@ import torch.optim as optim
 import random
 
 
-class Channel_Request_Attention(nn.Module):
-    def __init__(self, in_planes, ratio=16):
-        super(Channel_Request_Attention, self).__init__()
+# class Channel_Request_Attention(nn.Module):
+#     def __init__(self, in_planes, ratio=16):
+#         super(Channel_Request_Attention, self).__init__()
+#         self.avg_pool = nn.AdaptiveAvgPool2d(1)
+#         self.max_pool = nn.AdaptiveMaxPool2d(1)
+#
+#         self.sharedMLP = nn.Sequential(
+#             nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False), nn.ReLU(),
+#             nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False))
+#         self.sigmoid = nn.Sigmoid()
+#
+#     def forward(self, x):
+#         avgout = self.sharedMLP(self.avg_pool(x))
+#         maxout = self.sharedMLP(self.max_pool(x))
+#         return self.sigmoid(avgout + maxout)
+
+
+#[1,1,3]
+class Granularity_Request_Attention(nn.Module):
+    def __init__(self, in_channels, num_target_granularities=3, reduction_ratio=16):
+        super(Granularity_Request_Attention, self).__init__()
+        self.num_target_granularities = num_target_granularities
+
+
+        # 使用全局平均池化和最大池化
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.max_pool = nn.AdaptiveMaxPool2d(1)
 
-        self.sharedMLP = nn.Sequential(
-            nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False), nn.ReLU(),
-            nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False))
+        # MLP用于从全局特征生成粒度丰富度分数
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, in_channels // reduction_ratio, bias=False),
+            nn.ReLU(),
+            nn.Linear(in_channels // reduction_ratio, num_target_granularities, bias=False)
+        )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        avgout = self.sharedMLP(self.avg_pool(x))
-        maxout = self.sharedMLP(self.max_pool(x))
-        return self.sigmoid(avgout + maxout)
+        # 全局池化
+        avg_pool_out = self.avg_pool(x).view(x.size(0), -1)  # [B, C_total]
+        max_pool_out = self.max_pool(x).view(x.size(0), -1)  # [B, C_total]
+        # MLP处理
+        # 可以选择只用一种池化结果，或者将它们相加/拼接
+        # 这里以相加为例
+        global_context = avg_pool_out + max_pool_out  # [B, C_total]
 
+        A_C_scores = self.mlp(global_context)  # [B, num_target_granularities]
+        A_C = self.sigmoid(A_C_scores)  # [B, 3], 每个值在0-1之间，表示对应粒度的丰富度
+
+        return A_C
+
+#[1,1,c]
+class Semantic_Request_Attention(nn.Module):
+    def __init__(self, in_channels, out_channels_C_prime, reduction_ratio=16):
+        super(Semantic_Request_Attention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        # MLP用于生成语义上下文向量
+        # 与GCAM不同，这里的MLP输出维度是 C_prime，而不是固定的3
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, in_channels // reduction_ratio, bias=False),
+            nn.ReLU(),
+            nn.Linear(in_channels // reduction_ratio, out_channels_C_prime, bias=False)
+        )
+
+    def forward(self, x):  # x: [B, C_total, H, W]
+        avg_pool_out = self.avg_pool(x).view(x.size(0), -1)
+        max_pool_out = self.max_pool(x).view(x.size(0), -1)
+
+        global_context = avg_pool_out + max_pool_out
+
+        A_G = self.mlp(global_context)  # [B, C_prime]
+        # 可选: A_G = torch.sigmoid(A_G)
+        return A_G
 
 class Spatial_Request_Attention(nn.Module):
     def __init__(self, kernel_size=3):
@@ -78,8 +135,10 @@ class DeepInfoMaxLoss(nn.Module):
 class Communication(nn.Module):
     def __init__(self, args, in_planes):
         super(Communication, self).__init__()
-        self.channel_request = Channel_Request_Attention(in_planes)
+        # self.channel_request = Channel_Request_Attention(in_planes)
         self.spatial_request = Spatial_Request_Attention()
+        self.semantic_request = Semantic_Request_Attention()
+        self.granularity_request = Granularity_Request_Attention()
         self.channel_fusion = nn.Conv2d(in_planes * 2, in_planes, 1, bias=False)
         self.spatial_fusion = nn.Conv2d(2, 1, 1, bias=False)
         self.statisticsNetwork = StatisticsNetwork(in_planes * 2)
@@ -120,6 +179,7 @@ class Communication(nn.Module):
         self.gaussian_filter.bias.data.zero_()
 
     def forward(self, vox_list,feat_list,det_list,confidence_map_list=None):
+        all_agents_sparse_transmitted_data = [] #存储最终每个agent要传输的稀疏数据
         send_feats = []
         comm_rate_list = []
         sparse_mask_list = []
@@ -128,13 +188,11 @@ class Communication(nn.Module):
             agent_vox = vox_list[bs]
             agent_feature = feat_list[bs]
             agent_det = det_list[bs]
+            print("agent_feature.shape=", agent_feature.shape)
             print("agent_vox.shape=", agent_vox.shape)
-            print("agent_feature.shape=",agent_feature.shape)
-            print("agent_det.shape=", agent_det.shape)
             cav_num, C, H, W = agent_feature.shape
 
             fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
-            print("fused_bev.shape=",fused_bev.shape)
             if cav_num == 1:
                 send_feats.append(agent_feature)
                 ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
@@ -144,35 +202,56 @@ class Communication(nn.Module):
             collaborator_feature = torch.tensor([]).to(agent_feature.device)
             sparse_batch_mask = torch.tensor([]).to(agent_feature.device)
 
-            agent_channel_attention = self.channel_request(
-                agent_feature)
+            # agent_channel_attention = self.channel_request(
+            #     agent_feature)
             agent_spatial_attention = self.spatial_request(
-                agent_feature)
+                fused_bev)
+            agent_semantic_attention = self.semantic_request(
+                fused_bev
+            )
+            agent_granularity_attention = self.granularity_request(
+                fused_bev
+            )
             agent_activation = torch.mean(agent_feature, dim=1, keepdims=True).sigmoid()
             agent_activation = self.gaussian_filter(agent_activation)
 
-            ego_channel_request = (
-                    1 - agent_channel_attention[0,]).unsqueeze(0)
+            # ego_channel_request = (
+            #         1 - agent_channel_attention[0,]).unsqueeze(0)
             ego_spatial_request = (
                     1 - agent_spatial_attention[0,]).unsqueeze(0)
+            ego_semantic_request = (
+                    agent_semantic_attention[0,]).unsqueeze(0)
+            ego_granularity_request = (
+                    1 - agent_granularity_attention[0,]).unsqueeze(0)
+
 
             for i in range(cav_num - 1):
                 if self.request_flag:
-                    channel_coefficient = self.channel_fusion(torch.cat(
-                        [ego_channel_request, agent_channel_attention[i + 1,].unsqueeze(0)], dim=1))
+                    # channel_coefficient = self.channel_fusion(torch.cat(
+                    #     [ego_channel_request, agent_channel_attention[i + 1,].unsqueeze(0)], dim=1))
                     spatial_coefficient = self.spatial_fusion(torch.cat(
                         [ego_spatial_request, agent_spatial_attention[i + 1,].unsqueeze(0)], dim=1))
+                    semantic_coefficient = self.semantic_request(torch.cat(
+                        [ego_semantic_request, agent_semantic_attention[i+1,].unsqueeze(0)], dim=1))
+                    granularity_coefficient = self.granularity_request(torch.cat(
+                        [ego_granularity_request, agent_granularity_attention[i+1,].unsqueeze(0)],dim=1))
                 else:
-                    channel_coefficient = agent_channel_attention[i + 1,].unsqueeze(
-                        0)
+                    # channel_coefficient = agent_channel_attention[i + 1,].unsqueeze(
+                    #     0)
                     spatial_coefficient = agent_spatial_attention[i + 1,].unsqueeze(
+                        0)
+                    semantic_coefficient = agent_semantic_attention[i+1, ].unsqueeze(
+                        0)
+                    granularity_coefficient = agent_granularity_attention[i+1,].unsqueeze(
                         0)
 
                 spatial_coefficient = spatial_coefficient.sigmoid()
-                channel_coefficient = channel_coefficient.sigmoid()
-                smoth_channel_coefficient = F.conv1d(channel_coefficient.reshape(1, 1, C), self.d1_gaussian_filter,
-                                                     padding=(self.kernel_size - 1) // 2)
-                channel_coefficient = smoth_channel_coefficient.reshape(1, C, 1, 1)
+                # channel_coefficient = channel_coefficient.sigmoid()
+                semantic_coefficient = semantic_coefficient.sigmoid()
+                granularity_coefficient = granularity_coefficient.sigmoid()
+                # smoth_channel_coefficient = F.conv1d(channel_coefficient.reshape(1, 1, C), self.d1_gaussian_filter,
+                #                                      padding=(self.kernel_size - 1) // 2)
+                # channel_coefficient = smoth_channel_coefficient.reshape(1, C, 1, 1)
 
                 spatial_coefficient = self.gaussian_filter(spatial_coefficient)
                 sparse_matrix = channel_coefficient * spatial_coefficient
@@ -197,6 +276,8 @@ class Communication(nn.Module):
                 comm_rate = sparse_mask.sum() / (C * H * W)
                 comm_rate_list.append(comm_rate)
 
+                collaborator_fused_bev = torch.cat(
+                    [collaborator_fused_bev, agent_fused_bev[i+1].unsqueeze(0) * sparse_mask], dim=0)
                 collaborator_feature = torch.cat(
                     [collaborator_feature, agent_feature[i + 1,].unsqueeze(0) * sparse_mask], dim=0)
                 sparse_batch_mask = torch.cat(
