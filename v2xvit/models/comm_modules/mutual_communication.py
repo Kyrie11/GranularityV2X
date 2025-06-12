@@ -174,9 +174,9 @@ class Communication(nn.Module):
             bandwidth_vector_dim=3)
 
         #每个粒度的带宽成本
-        self.B_vox = torch.tensor(args["bandwidth_vox"])
-        self.B_feat = torch.tensor(args["bandwidth_feat"])
-        self.B_det = torch.tensor(args["bandwidth_det"])
+        self.B_vox = torch.tensor(args.get("bandwidth_vox",10.0))
+        self.B_feat = torch.tensor(args.get("bandwidth_feat",5.0))
+        self.B_det = torch.tensor(args.get("bandwidth_det",2.0))
 
     def init_gaussian_filter(self, k_size=5, sigma=1):
         def _gen_gaussian_kernel(k_size=5, sigma=1):
