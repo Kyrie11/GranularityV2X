@@ -5,8 +5,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 import random
 
-from scipy.linalg import bandwidth
-
 from v2xvit.models.comm_modules.utility_network import UtilityNetwork
 
 # class Channel_Request_Attention(nn.Module):
