@@ -354,7 +354,6 @@ class Communication(nn.Module):
         comm_rate_list = []
         # sparse_mask_list = []
         total_loss = torch.zeros(1).to(feat_list[0].device)
-        print("len(feat_list)=", len(feat_list))
         for bs in range(len(feat_list)):
             agent_vox = vox_list[bs]
             print("agent_vox.shape=",agent_vox.shape)
@@ -364,7 +363,6 @@ class Communication(nn.Module):
             print("agent_det.shape=",agent_det.shape)
             agent_fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
             cav_num, C, H, W = agent_feature.shape
-            utility_map_list = []
             spatial_coefficients = []
             semantic_coefficients = []
             granularity_coefficients = []
@@ -374,9 +372,6 @@ class Communication(nn.Module):
                 # ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
                 # sparse_mask_list.append(ones_mask)
                 continue
-
-            collaborator_feature = torch.tensor([]).to(agent_feature.device)
-            sparse_batch_mask = torch.tensor([]).to(agent_feature.device)
 
             # agent_channel_attention = self.channel_request(
             #     agent_feature)
@@ -424,25 +419,24 @@ class Communication(nn.Module):
                         0)
 
                 spatial_coefficient = spatial_coefficient.sigmoid()
-                print("spatial_coefficient.shape=",spatial_coefficient.shape)
                 semantic_coefficient = semantic_coefficient.sigmoid()
-                print("semantic_coefficient.shape=",semantic_coefficient.shape)
                 granularity_coefficient = granularity_coefficient.sigmoid()
-                print("granularity_coefficient.shape=", granularity_coefficient.shape)
-
-
-                #计算Best-Granularity-Selection的损失
-
 
                 spatial_coefficient = self.gaussian_filter(spatial_coefficient)
 
-                comm_rate = sparse_mask.sum() / (C * H * W)
-                comm_rate_list.append(comm_rate)
+                spatial_coefficients.append(spatial_coefficient)
+                semantic_coefficients.append(semantic_coefficient)
+                granularity_coefficients.append(granularity_coefficient)
+                # comm_rate = sparse_mask.sum() / (C * H * W)
+                # comm_rate_list.append(comm_rate)
 
 
             spatial_coefficients =  torch.cat(spatial_coefficients, dim=0)
+            print("spatial_coefficients.shape=", spatial_coefficients.shape)
             semantic_coefficients = torch.cat(semantic_coefficients, dim=0)
+            print("semantic_coefficients.shape", semantic_coefficients.shape)
             granularity_coefficients = torch.cat(granularity_coefficients, dim=0)
+
             utility_map_list = self.utility_net(agent_fused_bev[1:, :, :, :],
                                                 spatial_coefficients,
                                                 semantic_coefficients,
