@@ -125,6 +125,7 @@ model:
         replace_ratio: 0.2
         compression: 0.5
         voxel_size: *voxel_size
+        bandwidth: 50
       communication_flag: True
       agg_operator:
         mode: 'STCFormer'
