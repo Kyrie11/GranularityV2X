@@ -312,7 +312,7 @@ class Communication(nn.Module):
             agent_feature = feat_list[bs]
             print("agent_feature.shape=",agent_feature.shape)
             agent_det = det_list[bs]
-            print("agent_det.shape=",agent_det.shape=)
+            print("agent_det.shape=",agent_det.shape)
             agent_fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
             cav_num, C, H, W = agent_feature.shape
 
