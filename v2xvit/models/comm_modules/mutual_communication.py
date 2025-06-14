@@ -420,7 +420,9 @@ class Communication(nn.Module):
                         0)
 
                 spatial_coefficient = spatial_coefficient.sigmoid()
+                print("spatial_coefficient.shape=",spatial_coefficient.shape)
                 semantic_coefficient = semantic_coefficient.sigmoid()
+                print("semantic_coefficient.shape=",semantic_coefficient.shape)
                 granularity_coefficient = granularity_coefficient.sigmoid()
                 print("granularity_coefficient.shape=", granularity_coefficient.shape)
 
