@@ -354,6 +354,7 @@ class Communication(nn.Module):
         comm_rate_list = []
         # sparse_mask_list = []
         total_loss = torch.zeros(1).to(feat_list[0].device)
+        print("len(feat_list)=", len(feat_list))
         for bs in range(len(feat_list)):
             agent_vox = vox_list[bs]
             print("agent_vox.shape=",agent_vox.shape)
@@ -364,6 +365,9 @@ class Communication(nn.Module):
             agent_fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
             cav_num, C, H, W = agent_feature.shape
             utility_map_list = []
+            spatial_coefficients = []
+            semantic_coefficients = []
+            granularity_coefficients = []
             if cav_num == 1:
                 all_agents_sparse_transmitted_data.append(agent_fused_bev)
                 # send_feats.append(agent_feature)
@@ -426,69 +430,48 @@ class Communication(nn.Module):
                 granularity_coefficient = granularity_coefficient.sigmoid()
                 print("granularity_coefficient.shape=", granularity_coefficient.shape)
 
-                print("agent_fused_bev[i+1].shape=",agent_fused_bev[i+1].shape)
-                #调用效益网络计算sparse_matrix
-                utility_map = self.utility_net(agent_fused_bev[i+1],
-                                               spatial_coefficient,
-                                               granularity_coefficient,
-                                               semantic_coefficient,
-                                               self.bandwidth_vector)
 
-                #合并效益图
-                utility_map_list.append(utility_map)
-
-                #构建稀疏传输数据 f_collab_trans(BEV图)
-                f_collab_trans = torch.zeros_like(agent_fused_bev[0])
-                # for r_y in range(H):
-                #     for r_x in range(W):
-                #         selected_g_idx = selected_granularity_indices[r_y, r_x]
-                #         if selected_g_idx == 0:#Voxel
-                #             f_collab_trans[0, 0:10, r_y, r_x] = agent_vox[i+1, :, r_y, r_x]
-                #         elif selected_g_idx == 1:#Feat
-                #             f_collab_trans[0, 10:74, r_y, r_x] = agent_feature[i+1, :, r_y, r_x]
-                #         elif selected_g_idx == 2:#Detection
-                #             f_collab_trans[0, 74:90, r_y, r_x] = agent_det[i+1, :, r_y, r_x]
-
-                all_agents_sparse_transmitted_data.append(f_collab_trans)
                 #计算Best-Granularity-Selection的损失
-                target_utility = self.calculate_target_utility(agent_vox[i+1], agent_feature[i+1], agent_det[i+1],agent_fused_bev[i+1])
-                Loss_utility_pred = F.mse_loss(utility_map, target_utility)
-                Loss_recon = self.reconstruction(f_collab_trans, agent_fused_bev[i+1])
-                Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
+
 
                 spatial_coefficient = self.gaussian_filter(spatial_coefficient)
 
                 comm_rate = sparse_mask.sum() / (C * H * W)
                 comm_rate_list.append(comm_rate)
 
-                collaborator_fused_bev = torch.cat(
-                    [collaborator_fused_bev, agent_fused_bev[i+1].unsqueeze(0) * sparse_mask], dim=0)
-                collaborator_feature = torch.cat(
-                    [collaborator_feature, agent_feature[i + 1,].unsqueeze(0) * sparse_mask], dim=0)
-                sparse_batch_mask = torch.cat(
-                    [sparse_batch_mask, sparse_mask], dim=0)
 
-            utility_map_list = torch.cat(utility_map_list, dim=0)
-            all_sparse_trans_bevs, all_selected_indices = self.transmission_selector(agent_fused_bev, self.bandwidth_budget, utility_map_list)
+            spatial_coefficients =  torch.cat(spatial_coefficients, dim=0)
+            semantic_coefficients = torch.cat(semantic_coefficients, dim=0)
+            granularity_coefficients = torch.cat(granularity_coefficients, dim=0)
+            utility_map_list = self.utility_net(agent_fused_bev[1:, :, :, :],
+                                                spatial_coefficients,
+                                                semantic_coefficients,
+                                                granularity_coefficients)
+
+            target_utility = self.calculate_target_utility(agent_vox[1:, :, :, :],
+                                                           agent_feature[1:, :, :, :],
+                                                           agent_det[1:, :, :, :],
+                                                           agent_fused_bev[1:, :, :, :])
+
+            Loss_utility_pred = F.mse_loss(utility_map_list, target_utility)
+
+
+
+            all_sparse_trans_bevs, all_selected_indices = self.transmission_selector(agent_fused_bev[1:, :, :, :],
+                                                                                     self.bandwidth_budget,
+                                                                                     utility_map_list)
+
+            Loss_recon = self.reconstruction(all_sparse_trans_bevs, agent_fused_bev[1:, :, :, :])
+            Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
 
             org_feature = agent_feature.clone()
-            sparse_feature = torch.cat(
-                [agent_feature[:1], collaborator_feature], dim=0)
-            send_feats.append(sparse_feature)
-            ego_mask = torch.ones_like(agent_feature[:1]).to(
-                agent_feature[:1].device)
-            sparse_batch_mask = torch.cat(
-                [ego_mask, sparse_batch_mask], dim=0)
-            sparse_mask_list.append(sparse_batch_mask)
 
-            org_feature_prime = torch.cat(
-                [org_feature[1:], org_feature[0].unsqueeze(0)], dim=0)
-            local_mutual = self.statisticsNetwork(
-                torch.cat([org_feature, sparse_feature], dim=1))
-            local_mutual_prime = self.statisticsNetwork(
-                torch.cat([org_feature_prime, sparse_feature], dim=1))
-            loss = self.mutual_loss(local_mutual, local_mutual_prime)
-            total_loss += loss
+            sparse_feature = torch.cat(
+                [agent_fused_bev[:1], all_sparse_trans_bevs], dim=0)
+
+            all_agents_sparse_transmitted_data.append(sparse_feature)
+
+            total_loss += Loss_bgs
 
         if len(comm_rate_list) > 0:
             mean_rate = sum(comm_rate_list) / len(comm_rate_list)
