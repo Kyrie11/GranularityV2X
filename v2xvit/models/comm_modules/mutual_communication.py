@@ -4,6 +4,9 @@ import numpy as np
 import torch.nn.functional as F
 import torch.optim as optim
 import random
+
+from scipy.linalg import bandwidth
+
 from v2xvit.models.comm_modules.utility_network import UtilityNetwork
 
 # class Channel_Request_Attention(nn.Module):
@@ -131,6 +134,110 @@ class DeepInfoMaxLoss(nn.Module):
 
         return -mutual_info * self.loss_coeff
 
+class TransmissionSelector(nn.Module):
+    def __init__(self, C_V, C_F, C_D, bandwidth_costs, utility_network=None):
+        super(TransmissionSelector, self).__init__()
+        self.C_V = C_V
+        self.C_F = C_F
+        self.C_D = C_D
+        self.register_buffer("bandwidth_costs", torch.tensor(bandwidth_costs, dtype=torch.float32))
+        self.utility_newtwork = utility_network
+        self.total_channels_out = C_V+C_F+C_D
+
+    def selection_mechanism(self, utility_map_per_granularity, bandwidth_budget):
+        # utility_map_per_granularity: [B, H, W, 3] (每个像素对三种粒度的单位带宽效用)
+        # bandwidth_budget: scalar (总带宽预算)
+        B,H,W,G = utility_map_per_granularity.shape
+        device = utility_map_per_granularity.device
+
+        # 1. 将效用图和带宽成本展平，为每个潜在传输项 (b,h,w,g) 创建记录
+        # utility_map_flat: [B*H*W*G]
+        utility_map_flat = utility_map_per_granularity.reshape(-1)
+
+        #构建对应的带宽成本要求
+        #bandwidth_costs_expanded: [1,1,1,G]->[B,H,W,G]->[B*H*W*G]
+        bandwidth_costs_expanded = self.bandwidth_costs.view(1,1,1,G).expand(B,H,W,G).reshape(-1).to(device)
+
+        #构建索引,以便后续恢复
+        b_indices = torch.arange(B, device=device).view(B, 1, 1, 1).expand(B, H, W, G).reshape(-1)
+        h_indices = torch.arange(H, device=device).view(1, H, 1, 1).expand(B, H, W, G).reshape(-1)
+        w_indices = torch.arange(W, device=device).view(1, 1, W, 1).expand(B, H, W, G).reshape(-1)
+        g_indices = torch.arange(G, device=device).view(1, 1, 1, G).expand(B, H, W, G).reshape(-1)
+
+        #2. 贪心选择
+        sorted_indices = torch.argsort(utility_map_flat, descending=True)
+        selected_mask_flat = torch.zeros_like(utility_map_flat, dtype=torch.bool)
+
+        for idx in sorted_indices:
+            b_idx = b_indices[idx]
+            cost = bandwidth_costs_expanded[idx]
+
+        best_utility_per_pixel, best_granularity_idx_per_pixel = torch.max(utility_map_per_granularity, dim=3)
+        # best_utility_per_pixel: [B, H, W]
+        # best_granularity_idx_per_pixel: [B, H, W] (值为0,1,2)
+
+        utility_threshold = 0.5
+        should_transmit_pixel = best_utility_per_pixel > utility_threshold #[B,H,W]
+
+        selected_granularity_indices = torch.full_like(best_granularity_idx_per_pixel, -1.0)
+        selected_granularity_indices[should_transmit_pixel] = best_granularity_idx_per_pixel[should_transmit_pixel]
+
+        return selected_granularity_indices.float() # 返回浮点型以便后续乘法
+
+    def build_sparse_transmitted_bev(self, selected_granularity_indices,
+                                     F_vox_bev, F_feat_bev, F_det_bev):
+        # selected_granularity_indices: [B, H, W], 值为 -1, 0, 1, 2
+        # F_vox_bev: [B, C_V, H, W]
+        # F_feat_bev: [B, C_F, H, W]
+        # F_det_bev: [B, C_D, H, W]
+        B,H,W = selected_granularity_indices.shape
+        device = selected_granularity_indices.device
+
+        f_trans_bev = torch.zeros((B, self.total_channels_out, H, W), device=device, dtype=F_vox_bev.dtype)
+
+        #创建每个粒度的选择掩码
+        mask_vox = (selected_granularity_indices==0).unsqueeze(1) #[B,1,H,W]
+        mask_feat = (selected_granularity_indices==1).unsqueeze(1)
+        mask_det = (selected_granularity_indices==2).unsqueeze(1)
+
+        #填充体素通道
+        #需要确定体素通道在f_trans_bev中的范围
+        if self.C_V > 0:
+            f_trans_bev[:, :self.C_V, :, :] = F_vox_bev * mask_vox
+
+        #填充特征通道
+        start_idx_feat = self.C_V
+        end_idx_feat = self.C_V + self.C_F
+        if self.C_F > 0:
+            f_trans_bev[:, start_idx_feat:end_idx_feat, :, :] = F_feat_bev * mask_feat
+
+        #填充检测通道
+        start_idx_det = self.C_V + self.C_F
+        end_idx_det = self.C_V + self.C_F + self.C_D
+        if self.C_D > 0:
+            f_trans_bev[:, start_idx_det:end_idx_det, :, :] = F_det_bev * mask_det
+        return f_trans_bev
+
+    def forward(self, ego_requests, collab_states_list, collab_bev_data_list, bandwidth_budget):
+        all_sparse_trans_bevs = []
+        all_selected_indices = []
+
+        for i, utility_map_i in enumerate(utility_map_list):
+            #utility_map: [1,H,W,3]
+            #1.进行选择
+            selected_graunlarity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget/len(collab_bev_data_list))
+            all_selected_indices.append(selected_graunlarity_indices_i)
+
+            #2.构造稀疏传输图
+            collab_data = collab_bev_data_list[i]
+            sparse_trans_bev_i = self.build_sparse_transmitted_bev(
+                selected_graunlarity_indices_i,
+                collab_data['vox_bev'],
+                collab_data['feat_bev'],
+                collab_data['det_bev']
+            )
+            all_sparse_trans_bevs.append(sparse_trans_bev_i)
+        return all_sparse_trans_bevs, all_selected_indices
 
 class Communication(nn.Module):
     def __init__(self, args, in_planes):
@@ -147,6 +254,7 @@ class Communication(nn.Module):
         self.statisticsNetwork = StatisticsNetwork(in_planes * 2)
         self.mutual_loss = DeepInfoMaxLoss()
         self.request_flag = args['request_flag']
+        self.bandwidth_budget = args['bandwidth']
 
         self.smooth = False
         self.thre = args['thre']
@@ -195,22 +303,24 @@ class Communication(nn.Module):
 
     def forward(self, vox_list,feat_list,det_list,confidence_map_list=None):
         all_agents_sparse_transmitted_data = [] #存储最终每个agent要传输的稀疏数据
-        send_feats = []
         comm_rate_list = []
-        sparse_mask_list = []
+        # sparse_mask_list = []
         total_loss = torch.zeros(1).to(feat_list[0].device)
         for bs in range(len(feat_list)):
             agent_vox = vox_list[bs]
+            print("agent_vox.shape=",agent_vox.shape)
             agent_feature = feat_list[bs]
+            print("agent_feature.shape=",agent_feature.shape)
             agent_det = det_list[bs]
+            print("agent_det.shape=",agent_det.shape=)
             agent_fused_bev = torch.cat([agent_vox, agent_feature, agent_det], dim=1)
             cav_num, C, H, W = agent_feature.shape
 
             if cav_num == 1:
                 all_agents_sparse_transmitted_data.append(agent_fused_bev)
-                send_feats.append(agent_feature)
-                ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
-                sparse_mask_list.append(ones_mask)
+                # send_feats.append(agent_feature)
+                # ones_mask = torch.ones(cav_num, C, H, W).to(feat_list[0].device)
+                # sparse_mask_list.append(ones_mask)
                 continue
 
             collaborator_feature = torch.tensor([]).to(agent_feature.device)
@@ -222,21 +332,21 @@ class Communication(nn.Module):
                 agent_fused_bev)
             agent_semantic_attention = self.semantic_request(
                 agent_fused_bev)
-            print("agent_semantic_attention.shape=", agent_semantic_attention.shape)
+            # print("agent_semantic_attention.shape=", agent_semantic_attention.shape)
             agent_granularity_attention = self.granularity_request(
                 agent_fused_bev)
 
-            agent_activation = torch.mean(agent_feature, dim=1, keepdims=True).sigmoid()
-            agent_activation = self.gaussian_filter(agent_activation)
+            # agent_activation = torch.mean(agent_feature, dim=1, keepdims=True).sigmoid()
+            # agent_activation = self.gaussian_filter(agent_activation)
 
             # ego_channel_request = (
             #         1 - agent_channel_attention[0,]).unsqueeze(0)
             ego_spatial_request = (
                     1 - agent_spatial_attention[0,]).unsqueeze(0)
-            print("ego_spatial_request.shape=",ego_spatial_request.shape)
+            # print("ego_spatial_request.shape=",ego_spatial_request.shape)
             ego_semantic_request = (
                     agent_semantic_attention[0,]).unsqueeze(0)
-            print("ego_semantic_request.shape=", ego_semantic_request.shape)
+            # print("ego_semantic_request.shape=", ego_semantic_request.shape)
             ego_granularity_request = (
                     1 - agent_granularity_attention[0,]).unsqueeze(0)
 
@@ -265,6 +375,8 @@ class Communication(nn.Module):
                 semantic_coefficient = semantic_coefficient.sigmoid()
                 granularity_coefficient = granularity_coefficient.sigmoid()
 
+
+                bandwidth_vector = torch.tensor([10.0,5.0,2.0])
                 #调用效益网络计算sparse_matrix
                 utility_map = self.utility_net(agent_fused_bev[i+1],
                                                spatial_coefficient,
@@ -273,7 +385,7 @@ class Communication(nn.Module):
                                                bandwidth_vector)
 
                 #得到选择传输的数据
-                selected_granularity_indices = self.selection_mechanism(utility_map_collab, bandwidth_budget)
+                selected_granularity_indices = self.selection_mechanism(utility_map, self.bandwidth_budget)
                 #构建稀疏传输数据 f_collab_trans(BEV图)
                 f_collab_trans = torch.zeros_like(agent_fused_bev[0])
                 for r_y in range(H):
@@ -288,30 +400,12 @@ class Communication(nn.Module):
 
                 all_agents_sparse_transmitted_data.append(f_collab_trans)
                 #计算Best-Granularity-Selection的损失
-                target_utility = self.calculate_target_utility(agent_fused_bev[i+1], )
-                Loss_utility_pred = F.mse_loss(utility_map_collab, target_utility)
+                target_utility = self.calculate_target_utility(agent_vox[i+1], agent_feature[i+1], agent_det[i+1],agent_fused_bev[i+1])
+                Loss_utility_pred = F.mse_loss(utility_map, target_utility)
                 Loss_recon = self.reconstruction(f_collab_trans, agent_fused_bev[i+1])
                 Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
 
                 spatial_coefficient = self.gaussian_filter(spatial_coefficient)
-                sparse_matrix = channel_coefficient * spatial_coefficient
-                temp_activation = agent_activation[i + 1,].unsqueeze(0)
-                sparse_matrix = sparse_matrix * temp_activation
-
-                if self.thre > 0:
-                    ones_mask = torch.ones_like(
-                        sparse_matrix).to(sparse_matrix.device)
-                    zeros_mask = torch.zeros_like(
-                        sparse_matrix).to(sparse_matrix.device)
-                    sparse_mask = torch.where(
-                        sparse_matrix > self.thre, ones_mask, zeros_mask)
-                else:
-                    K = int(C * H * W * random.uniform(0, 0.3))
-                    communication_maps = sparse_matrix.reshape(1, C * H * W)
-                    _, indices = torch.topk(communication_maps, k=K, sorted=False)
-                    communication_mask = torch.zeros_like(communication_maps).to(communication_maps.device)
-                    ones_fill = torch.ones(1, K, dtype=communication_maps.dtype, device=communication_maps.device)
-                    sparse_mask = torch.scatter(communication_mask, -1, indices, ones_fill).reshape(1, C, H, W)
 
                 comm_rate = sparse_mask.sum() / (C * H * W)
                 comm_rate_list.append(comm_rate)

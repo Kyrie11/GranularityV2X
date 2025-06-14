@@ -22,7 +22,75 @@ class FiLMLayer(nn.Module):
 
         return gamma * x + beta
 
-#后续要补全：对每个粒度的带宽衡量
+
+#计算效益网络的GroundTruth
+class TargetUtilityCalculator(nn.Module):
+    def __init__(self, single_granularity_channels_list,
+                    full_bev_channels,
+                    embedding_dim=64,
+                    bandwidth_costs_list=None):
+        super(TargetUtilityCalculator, self).__init__()
+
+        self.num_granularites = len(single_granularity_channels_list)
+
+        #为每种单一粒度数据创建一个嵌入层
+        self.single_embedders = nn.ModuleList()
+        for C_g in single_granularity_channels_list:
+            self.single_embedders.append(nn.Linear(C_g, embedding_dim))
+
+        #为全信息创建一个嵌入层
+        self.full_embedder = nn.Linear(full_bev_channels, embedding_dim)
+
+        if bandwidth_costs_list is None:
+            #默认带宽成本
+            bandwidth_costs_list = [10.0, 5.0, 2.0]
+
+        self.register_buffer('bandwidth_costs', torch.tensor(bandwidth_costs_list, dtype=torch.float32))
+
+        self.similarity_func = nn.CosineSimilarity(dim=-1) #计算最后一个维度的余弦相似度
+
+    def forward(self, F_vox_bev, F_feat_bev, F_det_bev, X_bev):
+        # F_vox_bev_i: [B, C_V, H, W]
+        # F_feat_bev_i: [B, C_F, H, W] (假设已对齐到相同H,W)
+        # F_det_bev_i: [B, C_D, H, W]
+        # X_bev_i: [B, C_total, H, W] (全信息，由上面三个拼接而成)
+        B,_,H,W = X_bev.shape
+        target_utility_map = torch.zeros((B,H,W, self.num_granularites),
+                                         device=X_bev.device, dtype=X_bev.dtype)
+
+        # 将特征图转换为 [B, H, W, C] 的形式，方便逐像素处理
+        F_vox_bev_permuted = F_vox_bev.permute(0, 2, 3, 1)
+        F_feat_bev_permuted = F_feat_bev.permute(0, 2, 3, 1)
+        F_det_bev_permuted = F_det_bev.permute(0, 2, 3, 1)
+        X_bev_permuted = X_bev.permute(0, 2, 3, 1)
+        #将特征图转换为[B,H,W,C]的形式，方便逐像素处理
+        single_granularity_features = [
+            F_vox_bev_permuted,
+            F_feat_bev_permuted,
+            F_det_bev_permuted
+        ]
+
+        embedded_full_info = self.full_embedder(X_bev_permuted)
+
+        for g_idx in range(self.num_granularites):
+            #获取当前粒度的原始BEV特征
+            current_g_feat = single_granularity_features[g_idx] # [B, H, W, C_g]
+
+            #嵌入当前粒度的特征
+            embedded_single_g = self.single_embedders[g_idx](current_g_feat) # [B, H, W, C_g]
+
+            #计算相似度
+            similarity = self.similarity_func(embedded_single_g, embedded_full_info)  # [B, H, W]
+            # Similarity 范围是 [-1, 1]，可以调整到 [0, 1] 作为信息保留度
+            retain_degree = (similarity + 1.0) / 2.0
+
+            # 计算单位带宽效用
+            target_utility_map[:, :, :, g_idx] = retain_degree / self.bandwidth_costs[g_idx]
+        return target_utility_map #[B,H,W,3]
+
+
+
+            #后续要补全：对每个粒度的带宽衡量
 class UtilityNetwork(nn.Module):
     def __init__(self, collab_bev_channels,
                  spatial_coeff_channels, # X_S^{(i)} 的通道数 (例如1或更多)
@@ -36,7 +104,7 @@ class UtilityNetwork(nn.Module):
         self.output_granularity_channels = output_granularity_channels
         # 1. 初步卷积处理 Collaborator BEV 特征
         self.initial_conv = nn.Sequential(
-            nn.Conv2d(collab_bev_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.Conv2d(collab_bev_channels+1, hidden_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(hidden_channels),  # 可选
             nn.ReLU()
         )
@@ -66,16 +134,16 @@ class UtilityNetwork(nn.Module):
         self.output_conv = nn.Conv2d(hidden_channels, output_granularity_channels, kernel_size=1)
 
     def forward(self, collab_fused_bev,  # [B, C_collab_total, H, W]
-                spatial_coefficient,  # [B, C_S', H, W]
+                spatial_coefficient,  # [B, 1, H, W]
                 granularity_coefficient,  # [B, 3]
                 semantic_coefficient,  # [B, C']
                 bandwidth_vector  # [B, 3]
                 ):
 
-        batch_size = collab_fused_bev.shape[0]
+        x_input = torch.cat([collab_fused_bev, spatial_coefficient], dim=1)
 
         # a. 初步处理collab BEV特征
-        x = self.initial_conv(collab_fused_bev)  # [B, hidden_channels, H, W]
+        x = self.initial_conv(x_input)  # [1, hidden_channels, H, W]
 
         # b. (可选) 融合空间交互系数
         # 如果 spatial_coefficient 是特征图，可以与 x 拼接后再通过一个1x1卷积
@@ -105,6 +173,6 @@ class UtilityNetwork(nn.Module):
         utility_map = self.output_conv(x)  # [B, output_granularity_channels=3, H, W]
 
         # 将通道维度放到最后，以匹配 [H,W,3] 的语义
-        # utility_map = utility_map.permute(0, 2, 3, 1)  # [B, H, W, 3]
+        utility_map = utility_map.permute(0, 2, 3, 1)  # [B, H, W, 3]
 
         return utility_map
