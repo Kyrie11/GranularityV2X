@@ -93,7 +93,6 @@ class TargetUtilityCalculator(nn.Module):
             #后续要补全：对每个粒度的带宽衡量
 class UtilityNetwork(nn.Module):
     def __init__(self, collab_bev_channels,
-                 spatial_coeff_channels, # X_S^{(i)} 的通道数 (例如1或更多)
                  granularity_coeff_dim,  # X_C^{(i)} 的维度 (例如3)
                  semantic_coeff_dim,     # X_G^{(i)} 的维度 (例如C')
                  bandwidth_vector_dim,   # B 的维度 (3)
