@@ -437,7 +437,7 @@ class Communication(nn.Module):
             print("semantic_coefficients.shape", semantic_coefficients.shape)
             granularity_coefficients = torch.cat(granularity_coefficients, dim=0)
 
-            collaborators_num = agent_fused_bev.shape[0]
+            collaborators_num = agent_fused_bev.shape[0] -1
             utility_map_list = self.utility_net(agent_fused_bev[1:, :, :, :],
                                                 spatial_coefficients,
                                                 semantic_coefficients,
