@@ -437,10 +437,12 @@ class Communication(nn.Module):
             print("semantic_coefficients.shape", semantic_coefficients.shape)
             granularity_coefficients = torch.cat(granularity_coefficients, dim=0)
 
+            collaborators_num = agent_fused_bev.shape[0]
             utility_map_list = self.utility_net(agent_fused_bev[1:, :, :, :],
                                                 spatial_coefficients,
                                                 semantic_coefficients,
-                                                granularity_coefficients)
+                                                granularity_coefficients,
+                                                self.bandwidth_vector.expand(collaborators_num, -1))
 
             target_utility = self.calculate_target_utility(agent_vox[1:, :, :, :],
                                                            agent_feature[1:, :, :, :],
@@ -458,7 +460,6 @@ class Communication(nn.Module):
             Loss_recon = self.reconstruction(all_sparse_trans_bevs, agent_fused_bev[1:, :, :, :])
             Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
 
-            org_feature = agent_feature.clone()
 
             sparse_feature = torch.cat(
                 [agent_fused_bev[:1], all_sparse_trans_bevs], dim=0)
@@ -467,10 +468,9 @@ class Communication(nn.Module):
 
             total_loss += Loss_bgs
 
-        if len(comm_rate_list) > 0:
-            mean_rate = sum(comm_rate_list) / len(comm_rate_list)
-        else:
-            mean_rate = torch.tensor(0).to(feat_list[0].device)
-        sparse_mask = torch.cat(sparse_mask_list, dim=0)
+        # if len(comm_rate_list) > 0:
+        #     mean_rate = sum(comm_rate_list) / len(comm_rate_list)
+        # else:
+        #     mean_rate = torch.tensor(0).to(feat_list[0].device)
 
-        return send_feats, total_loss, mean_rate, sparse_mask
+        return all_agents_sparse_transmitted_data, total_loss
