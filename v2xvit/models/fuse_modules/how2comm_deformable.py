@@ -318,16 +318,9 @@ class How2comm(nn.Module):
                         his_vox = torch.cat(history_vox_list, dim=0)
                         his_det = torch.cat(history_det_list, dim=0)
                         if self.communication_flag:
-                            sparse_feats, commu_loss, communication_rates, sparse_history, sparse_voxels, sparse_coords = self.how2comm.communication(
+                            all_agents_sparse_transmitted_data, total_loss, sparse_history = self.how2comm.communication(
                             vox_bev,x,det_bev,record_len,history_vox_list,history_list,history_det_list,temp_psm_list)
-                            # 体素投影融合
-                            voxel_bev = self.voxel_projector(
-                                x,
-                                record_len,
-                                sparse_voxels,
-                                sparse_coords,
-                                pairwise_t_matrix_4d
-                            )
+
                             voxel_bev = torch.stack(voxel_bev, dim=0)
                             print("voxel_bev的形状是:", voxel_bev)
                             # 多模态特征融合

@@ -50,15 +50,18 @@ class How2commPreprocess(nn.Module):
         vox_list = self.regroup(vox_bev, record_len)
         feat_list = self.regroup(feats, record_len)
         det_list = self.regroup(det_bev, record_len)
-        sparse_feat_list, commu_loss, commu_rate, sparse_mask, sparse_voxels, sparse_coords = self.commu_module(
+        all_agents_sparse_transmitted_data, total_loss = self.commu_module(
             vox_list,feat_list,det_list,confidence_map_list)
-        sparse_feats = torch.cat(sparse_feat_list, dim=0)
+        all_agents_sparse_transmitted_data = torch.cat(all_agents_sparse_transmitted_data, dim=0)
         sparse_history_list = []
-        for i in range(len(sparse_feat_list)):
-            sparse_history = torch.cat([history_list[i][:1], sparse_feat_list[i][1:]], dim=0)
+        print("history_list.shape=",history_list.shape)
+        for i in range(len(all_agents_sparse_transmitted_data)):
+            ego_history = torch.cat([history_vox_list[i][:1], history_list[i][:1], history_det_list[i][:1]], dim=0)
+            sparse_history = torch.cat([ego_history, all_agents_sparse_transmitted_data[i][1:]], dim=0)
             sparse_history_list.append(sparse_history)
+
         sparse_history = torch.cat(sparse_history_list, dim=0)
-        return sparse_feats, commu_loss, commu_rate, sparse_history, sparse_voxels, sparse_coords
+        return all_agents_sparse_transmitted_data,  total_loss, sparse_history
 
     def forward(self, fused_curr, fused_history, record_len, backbone=None, heads=None):
         vox_curr, feat_curr, det_curr = fused_curr
