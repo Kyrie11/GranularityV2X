@@ -52,7 +52,7 @@ class How2commPreprocess(nn.Module):
         det_list = self.regroup(det_bev, record_len)
         all_agents_sparse_transmitted_data, total_loss = self.commu_module(
             vox_list,feat_list,det_list,confidence_map_list)
-        all_agents_sparse_transmitted_data = torch.cat(all_agents_sparse_transmitted_data, dim=0)
+        # all_agents_sparse_transmitted_data = torch.cat(all_agents_sparse_transmitted_data, dim=0)
         sparse_history_list = []
 
         for i in range(len(all_agents_sparse_transmitted_data)):
