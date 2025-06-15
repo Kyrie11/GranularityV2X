@@ -6,7 +6,7 @@ import torch.optim as optim
 import random
 
 from v2xvit.models.comm_modules.utility_network import UtilityNetwork, TargetUtilityCalculator
-
+from v2xvit.loss.recon_loss import ReconstructionLoss
 
 # class Channel_Request_Attention(nn.Module):
 #     def __init__(self, in_planes, ratio=16):
@@ -341,6 +341,7 @@ class Communication(nn.Module):
         self.transmission_selector = TransmissionSelector(C_V=10, C_F=64, C_D=16,
                                                           bandwidth_costs=self.bandwidth_vector,utility_network=self.utility_net)
 
+        self.recon_loss = ReconstructionLoss(90)
 
     def init_gaussian_filter(self, k_size=5, sigma=1):
         def _gen_gaussian_kernel(k_size=5, sigma=1):
@@ -466,7 +467,7 @@ class Communication(nn.Module):
                                                                                      self.bandwidth_budget,
                                                                                      utility_map_list)
 
-            Loss_recon = self.reconstruction(all_sparse_trans_bevs, agent_fused_bev[1:, :, :, :])
+            Loss_recon = self.recon_loss(all_sparse_trans_bevs, agent_fused_bev[1:, :, :, :])
             Loss_bgs = Loss_utility_pred + 0.2 * Loss_recon
 
 
