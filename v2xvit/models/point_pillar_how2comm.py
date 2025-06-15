@@ -140,12 +140,14 @@ class PointPillarHow2comm(nn.Module):
                 self.regroup(spatial_features, record_len))
 
             vox_bev = batch_dict['vox_bev']
+            #下采样
+            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
             regroup_vox_list.append(self.regroup(vox_bev, record_len))
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
-            target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-            psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
-            rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
+            # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
+            # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
+            # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
             det_bev = torch.cat([psm, rm], dim=1)
             regroup_det_list.append(self.regroup(det_bev, record_len))
 
@@ -163,24 +165,25 @@ class PointPillarHow2comm(nn.Module):
         psm_single = self.cls_head(spatial_features_2d)
         rm_single = self.reg_head(spatial_features_2d)
 
-        target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-        upsampled_psm= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
-        upsampled_rm = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
+        # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
+        # upsampled_psm= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
+        # upsampled_rm = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
         #得到三个粒度的bev
         vox_bev = torch.tensor(batch_dict['vox_bev'])
-        det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
-        fused_bev = torch.cat([vox_bev, spatial_features, det_bev], dim=1)
+        # det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
+        det_bev = torch.cat([psm_single, rm_single], dim=1)
+        fused_bev = [vox_bev, spatial_features, det_bev]
         print("fused_bev.shape=", fused_bev.shape)
         fused_his = [history_vox, history_feature, history_det]
 
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                [vox_bev, spatial_features, det_bev], psm_single, record_len, pairwise_t_matrix, self.backbone,
+                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
                 [self.shrink_conv, self.cls_head, self.reg_head])
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                [vox_bev, spatial_features, det_bev], psm_single, record_len, pairwise_t_matrix, self.backbone,
+                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
                 [self.shrink_conv, self.cls_head, self.reg_head], history=fused_his)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
