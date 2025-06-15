@@ -173,7 +173,6 @@ class PointPillarHow2comm(nn.Module):
         # det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
         det_bev = torch.cat([psm_single, rm_single], dim=1)
         fused_bev = [vox_bev, spatial_features, det_bev]
-        print("fused_bev.shape=", fused_bev.shape)
         fused_his = [history_vox, history_feature, history_det]
 
 
