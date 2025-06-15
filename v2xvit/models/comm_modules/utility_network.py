@@ -140,6 +140,9 @@ class UtilityNetwork(nn.Module):
                 ):
         device = collab_fused_bev.device
         bandwidth_vector = bandwidth_vector.to(device)
+        print("bandwidth_vector.shape=", bandwidth_vector.shape)
+        print("granularity_coefficient.shape=", granularity_coefficient.shape)
+        print("semantic_coefficient.shape=",semantic_coefficient.shape)
         x_input = torch.cat([collab_fused_bev, spatial_coefficient], dim=1)
 
         # a. 初步处理collab BEV特征
@@ -158,7 +161,7 @@ class UtilityNetwork(nn.Module):
             granularity_coefficient,
             semantic_coefficient,
             bandwidth_vector
-        ], dim=-1)  # [B, total_condition_dim]
+        ], dim=1)  # [B, total_condition_dim]
 
         # d. 通过条件卷积块
         for layer_module in self.conditional_blocks:
