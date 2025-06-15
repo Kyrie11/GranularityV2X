@@ -138,7 +138,8 @@ class UtilityNetwork(nn.Module):
                 semantic_coefficient,  # [B, C']
                 bandwidth_vector  # [B, 3]
                 ):
-
+        device = collab_fused_bev.device
+        bandwidth_vector = bandwidth_vector.to(device)
         x_input = torch.cat([collab_fused_bev, spatial_coefficient], dim=1)
 
         # a. 初步处理collab BEV特征
