@@ -5,7 +5,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import random
 
-from v2xvit.models.comm_modules.utility_network import UtilityNetwork
+from v2xvit.models.comm_modules.utility_network import UtilityNetwork, TargetUtilityCalculator
+
 
 # class Channel_Request_Attention(nn.Module):
 #     def __init__(self, in_planes, ratio=16):
@@ -323,6 +324,7 @@ class Communication(nn.Module):
             granularity_coeff_dim=3,  # X_C 的维度
             semantic_coeff_dim=self.semantic_channel, # X_G 的维度
             bandwidth_vector_dim=3)
+        self.target_utility_calculator = TargetUtilityCalculator([10,64,16],90)
 
         #每个粒度的带宽成本
         self.B_vox = torch.tensor(args.get("bandwidth_vox",10.0))
@@ -444,12 +446,12 @@ class Communication(nn.Module):
                                                 granularity_coefficients,
                                                 self.bandwidth_vector.expand(collaborators_num, -1))
 
-            target_utility = self.calculate_target_utility(agent_vox[1:, :, :, :],
+            target_utility_map = self.target_utility_calculator(agent_vox[1:, :, :, :],
                                                            agent_feature[1:, :, :, :],
                                                            agent_det[1:, :, :, :],
                                                            agent_fused_bev[1:, :, :, :])
 
-            Loss_utility_pred = F.mse_loss(utility_map_list, target_utility)
+            Loss_utility_pred = F.mse_loss(utility_map_list, target_utility_map)
 
 
 

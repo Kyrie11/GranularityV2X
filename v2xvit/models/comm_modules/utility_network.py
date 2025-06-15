@@ -25,7 +25,7 @@ class FiLMLayer(nn.Module):
 
 #计算效益网络的GroundTruth
 class TargetUtilityCalculator(nn.Module):
-    def __init__(self, single_granularity_channels_list,
+    def __init__(self, single_granularity_channels_list, #[C_V,C_F,C_D]
                     full_bev_channels,
                     embedding_dim=64,
                     bandwidth_costs_list=None):
