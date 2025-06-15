@@ -61,6 +61,7 @@ class How2commPreprocess(nn.Module):
             # print("history_det_list[i][:1].shape=",history_det_list[i][:1].shape)
             ego_history = torch.cat([history_vox_list[i][:1], history_list[i][:1], history_det_list[i][:1]], dim=1)
             print("ego_history.shape=", ego_history.shape)
+            print("all_agents_sparse_transmitted_data[i].shape=",all_agents_sparse_transmitted_data[i].shape)
             sparse_history = torch.cat([ego_history, all_agents_sparse_transmitted_data[i][1:]], dim=0)
             sparse_history_list.append(sparse_history)
 
