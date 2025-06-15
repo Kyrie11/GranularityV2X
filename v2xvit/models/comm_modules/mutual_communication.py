@@ -263,25 +263,31 @@ class TransmissionSelector(nn.Module):
         all_sparse_trans_bevs = []
         all_selected_indices = []
 
-        for i, utility_map_i in enumerate(utility_map_list):  # 遍历每个协作方的效用图
-            # utility_map_i: [1, H, W, 3] (假设batch_size为1)
-            print("utility_map_i.shape=",utility_map_i.shape)
-            # 1. 进行选择 (这是核心的背包问题或其近似)
-            selected_granularity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget / cav_num)  # 简单均分预算
-            all_selected_indices.append(selected_granularity_indices_i)
+        selected_granularity_indices = self.selection_mechanism(utility_map_list, bandwidth_budget/cav_num)
+        sparse_trans_bev = self.build_sparse_transmitted_bev(selected_granularity_indices,
+                                                             collab_bev_data_list[:, :self.C_V, :, :],
+                                                             collab_bev_data_list[:, self.C_V:self.C_V + self.C_F, :, :],
+                                                             collab_bev_data_list[:, self.C_V + self.C_F:self.C_V + self.C_F + self.C_D, :, :])
 
-            # 2. 构建稀疏传输图
-            collab_data = collab_bev_data_list[i]
-            sparse_trans_bev_i = self.build_sparse_transmitted_bev(
-                selected_granularity_indices_i,
-                collab_data[:self.C_V, :, :],
-                collab_data[self.C_V:self.C_V+self.C_F, :, :],
-                collab_data[self.C_V+self.C_F:self.C_V+self.C_F+self.C_D, :, :]
-            )
-            all_sparse_trans_bevs.append(sparse_trans_bev_i)
+        # for i, utility_map_i in enumerate(utility_map_list):  # 遍历每个协作方的效用图
+        #     # utility_map_i: [1, H, W, 3] (假设batch_size为1)
+        #     print("utility_map_i.shape=",utility_map_i.shape)
+        #     # 1. 进行选择 (这是核心的背包问题或其近似)
+        #     selected_granularity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget / cav_num)  # 简单均分预算
+        #     all_selected_indices.append(selected_granularity_indices_i)
+        #
+        #     # 2. 构建稀疏传输图
+        #     collab_data = collab_bev_data_list[i]
+        #     sparse_trans_bev_i = self.build_sparse_transmitted_bev(
+        #         selected_granularity_indices_i,
+        #         collab_data[:self.C_V, :, :],
+        #         collab_data[self.C_V:self.C_V+self.C_F, :, :],
+        #         collab_data[self.C_V+self.C_F:self.C_V+self.C_F+self.C_D, :, :]
+        #     )
+        #     all_sparse_trans_bevs.append(sparse_trans_bev_i)
 
         # 返回所有协作方选择传输的稀疏BEV图列表，以及选择的索引（用于可能的损失计算或分析）
-        return all_sparse_trans_bevs, all_selected_indices
+        return sparse_trans_bev, selected_granularity_indices
 
 
 class Communication(nn.Module):
