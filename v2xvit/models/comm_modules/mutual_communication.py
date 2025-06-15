@@ -258,6 +258,7 @@ class TransmissionSelector(nn.Module):
 
         # ... (省略了调用utility_network得到utility_map_list的过程) ...
         # 假设 utility_map_list 是一个包含了每个协作方预测的效用图的列表
+        cav_num = collab_bev_data_list.shape[0]
 
         all_sparse_trans_bevs = []
         all_selected_indices = []
@@ -266,8 +267,7 @@ class TransmissionSelector(nn.Module):
             # utility_map_i: [1, H, W, 3] (假设batch_size为1)
 
             # 1. 进行选择 (这是核心的背包问题或其近似)
-            selected_granularity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget / len(
-                collab_bev_data_list))  # 简单均分预算
+            selected_granularity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget / cav_num)  # 简单均分预算
             all_selected_indices.append(selected_granularity_indices_i)
 
             # 2. 构建稀疏传输图
@@ -445,6 +445,7 @@ class Communication(nn.Module):
                                                 semantic_coefficients,
                                                 granularity_coefficients,
                                                 self.bandwidth_vector.expand(collaborators_num, -1))
+            print("utility_map_list.shape=",utility_map_list.shape)
 
             target_utility_map = self.target_utility_calculator(agent_vox[1:, :, :, :],
                                                            agent_feature[1:, :, :, :],
