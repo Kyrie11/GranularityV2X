@@ -159,9 +159,15 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
+        short_history_feature = regroup_feature_list_large[-1:-3]
+        long_history_feature = regroup_feature_list_large[-1::4]
+        print('len(short_history_feature)=', len(short_history_feature))
+        print('len(long_history_feature)=', len(long_history_feature))
         print("len(regroup_feature_list_large)=",len(regroup_feature_list_large))
         history_vox = transform_feature(regroup_vox_list, self.delay)
+        short_history_vox = regroup_vox_list[-3:-1]
         history_det = transform_feature(regroup_det_list, self.delay)
+        short_history_det = regroup_det_list[-3:-1]
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
