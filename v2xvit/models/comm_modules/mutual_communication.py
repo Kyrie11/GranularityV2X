@@ -144,7 +144,7 @@ class Communication(nn.Module):
         self.semantic_request = Semantic_Request_Attention(90, 16)
         self.granularity_request = Granularity_Request_Attention(90)
         self.channel_fusion = nn.Conv2d(in_planes * 2, in_planes, 1, bias=False)
-        self.spatial_fusion = nn.Conv2d(2, 1, 1, kernel_size=3, padding=1,bias=False)
+        self.spatial_fusion = nn.Conv2d(2, 1,  kernel_size=3, padding=1,bias=False)
         self.granularity_fusion = nn.Linear(3+3, 3) # R_C_ego (3) + A_C_collab (3) -> X_C (3)
         self.semantic_channel = 16
         self.semantic_fusion = nn.Linear(2*self.semantic_channel, self.semantic_channel)
