@@ -45,7 +45,7 @@ class PointPillarHow2comm(nn.Module):
 
         self.fusion_net = How2comm(args['fusion_args'], args)
         self.frame = args['fusion_args']['frame']
-        self.delay = 1
+        self.delay = 2
         self.discrete_ratio = args['fusion_args']['voxel_size'][0]
         self.downsample_rate = args['fusion_args']['downsample_rate']
         self.multi_scale = args['fusion_args']['multi_scale']
