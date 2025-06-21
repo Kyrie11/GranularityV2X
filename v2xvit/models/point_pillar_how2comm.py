@@ -159,8 +159,8 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
-        short_history_feature = regroup_feature_list_large[-1:-3]
-        long_history_feature = regroup_feature_list_large[-1::4]
+        short_history_feature = regroup_feature_list_large[-3:-1]
+        long_history_feature = regroup_feature_list_large[len(regroup_feature_list)-1::4]
         print('len(short_history_feature)=', len(short_history_feature))
         print('len(long_history_feature)=', len(long_history_feature))
         print("len(regroup_feature_list_large)=",len(regroup_feature_list_large))
