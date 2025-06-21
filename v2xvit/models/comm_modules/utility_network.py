@@ -89,8 +89,164 @@ class TargetUtilityCalculator(nn.Module):
         return target_utility_map #[B,H,W,3]
 
 
+class TransmissionSelector(nn.Module):
+    def __init__(self, C_V, C_F, C_D, bandwidth_costs, utility_network=None, no_transmission_utility_penalty=0.0):
+        super(TransmissionSelector, self).__init__()
+        self.C_V = C_V
+        self.C_F = C_F
+        self.C_D = C_D
+        self.register_buffer('bandwidth_costs_tensor',
+                             torch.tensor(bandwidth_costs, dtype=torch.float32))  # [B_vox, B_feat, B_det]
+        self.utility_network = utility_network  # 传入预训练或正在训练的效用网络
+        self.num_granularities = len(bandwidth_costs)
+        self.total_channels_out = C_V + C_F + C_D
 
-            #后续要补全：对每个粒度的带宽衡量
+        # 引入一个小的惩罚项，使得在效用都接近0时，倾向于不传输
+        # 或者，可以将其视为不传输的“效用”是负的（如果U是正向效用）
+        self.no_transmission_utility_penalty = no_transmission_utility_penalty
+
+    def selection_mechanism(self, utility_map_per_granularity, bandwidth_budget_per_sample):
+        # utility_map_per_granularity: [B, H, W, 3] (每个像素对三种粒度的单位带宽效用)
+        # bandwidth_budget: scalar (总带宽预算)
+
+        B, H, W, G = utility_map_per_granularity.shape
+        assert G == self.num_granularities, "Utility map granularity dim mismatch"
+        device = utility_map_per_granularity.device
+
+        # 初始化最终的选择索引图，-1代表不选择任何粒度
+        selected_granularity_indices = torch.full((B, H, W), -1.0, device=device, dtype=torch.float32)
+
+        # 1. 阶段一：区域内最优粒度选择 (并考虑不传输的选项)
+        #    我们希望选择的粒度能最大化 U_g (单位带宽效用)
+        #    如果所有粒度的 U_g 都很低 (例如，低于某个阈值或低于不传输的效用)，则不传输
+        # 假设不传输的单位带宽效用是一个小的负值（或0，取决于U的范围）
+        # 为了让模型有不选择的倾向，可以给“不传输”一个固定的效用值，例如0，
+        # 如果所有粒度的预测效用都小于这个值，则不选。
+        # 或者，在比较时，如果max(U_g) < threshold_for_transmission，则不选。
+        # 这里我们直接取每个位置效用最高的粒度
+        best_utility_at_pixel, best_granularity_idx_at_pixel = torch.max(utility_map_per_granularity, dim=3)
+        # best_utility_at_pixel: [B, H, W]
+        # best_granularity_idx_at_pixel: [B, H, W] (值为0, 1, 2)
+
+        # 考虑一个最小效用阈值，低于此阈值的即使是局部最优也不选择
+        # (这个阈值可以是一个超参数，或者根据no_transmission_utility_penalty调整)
+        min_utility_threshold = self.no_transmission_utility_penalty # 示例：如果效用小于0就不值得传
+
+        # 创建一个列表存储所有潜在的“区域最优传输选项”
+        # 每个元素: (utility, cost, b_idx, r_y, r_x, g_idx)
+        candidate_items = []
+
+        for b_idx in range(B):
+            for r_y in range(H):
+                for r_x in range(W):
+                    current_best_g_idx = best_granularity_idx_at_pixel[b_idx, r_y, r_x].item()
+                    current_best_utility = best_utility_at_pixel[b_idx, r_y, r_x].item()
+
+                    if current_best_utility > min_utility_threshold:  # 只有当最优粒度的效用足够高时才考虑
+                        cost = self.bandwidth_costs_tensor[current_best_g_idx].item()
+                        candidate_items.append({
+                            'utility': current_best_utility,  # 这是单位带宽效用
+                            'cost': cost,
+                            'b_idx': b_idx,
+                            'r_y': r_y,
+                            'r_x': r_x,
+                            'g_idx': current_best_g_idx
+                        })
+
+        # 2. 阶段二：跨区域带宽约束下的选择 (贪心)
+        #    按照单位带宽效用（即 candidate_items中的 'utility'）降序排序
+        candidate_items.sort(key=lambda x: x['utility'], reverse=True)
+        current_sample_bandwidth_usage = torch.zeros(B, device=device)
+
+        for item in candidate_items:
+            b_idx, r_y, r_x, g_idx = item['b_idx'], item['r_y'], item['r_x'], item['g_idx']
+            cost = item['cost']
+
+            if current_sample_bandwidth_usage[b_idx] + cost <= bandwidth_budget_per_sample:
+                selected_granularity_indices[b_idx, r_y, r_x] = float(g_idx)
+                current_sample_bandwidth_usage[b_idx] += cost
+
+        return selected_granularity_indices  # [B, H, W]
+
+    def build_sparse_transmitted_bev(self, selected_granularity_indices,
+                                     F_vox_bev, F_feat_bev, F_det_bev):
+        # selected_granularity_indices: [B, H, W], 值为 -1, 0, 1, 2
+        # F_vox_bev: [B, C_V, H, W]
+        # F_feat_bev: [B, C_F, H, W]
+        # F_det_bev: [B, C_D, H, W]
+
+        B, H, W = selected_granularity_indices.shape
+        device = selected_granularity_indices.device
+
+        f_trans_bev = torch.zeros((B, self.total_channels_out, H, W), device=device, dtype=F_vox_bev.dtype)
+
+        # 创建每个粒度的选择掩码
+        mask_vox = (selected_granularity_indices == 0).unsqueeze(1)  # [B, 1, H, W]
+        mask_feat = (selected_granularity_indices == 1).unsqueeze(1)
+        mask_det = (selected_granularity_indices == 2).unsqueeze(1)
+
+        # 填充体素通道
+        # 需要确定体素通道在f_trans_bev中的范围，假设是前C_V个
+        if self.C_V > 0:
+            f_trans_bev[:, :self.C_V, :, :] = F_vox_bev * mask_vox
+
+        # 填充特征通道
+        # 假设特征通道在体素通道之后
+        start_idx_feat = self.C_V
+        end_idx_feat = self.C_V + self.C_F
+        if self.C_F > 0:
+            f_trans_bev[:, start_idx_feat:end_idx_feat, :, :] = F_feat_bev * mask_feat
+
+        # 填充检测通道
+        # 假设检测通道在特征通道之后
+        start_idx_det = self.C_V + self.C_F
+        end_idx_det = self.C_V + self.C_F + self.C_D
+        if self.C_D > 0:
+            f_trans_bev[:, start_idx_det:end_idx_det, :, :] = F_det_bev * mask_det
+
+        return f_trans_bev
+
+    def forward(self, collab_bev_data_list, bandwidth_budget, utility_map_list):
+        # ego_requests: {'R_S_ego':..., 'R_C_ego':..., 'A_G_ego':...}
+        # collab_states_list: list of {'A_S_collab':..., 'A_C_collab':..., 'A_G_collab':...}
+        # collab_bev_data_list: list of {'vox_bev':..., 'feat_bev':..., 'det_bev':...}
+
+        # ... (省略了调用utility_network得到utility_map_list的过程) ...
+        # 假设 utility_map_list 是一个包含了每个协作方预测的效用图的列表
+        cav_num = collab_bev_data_list.shape[0]
+
+        all_sparse_trans_bevs = []
+        all_selected_indices = []
+
+        selected_granularity_indices = self.selection_mechanism(utility_map_list, bandwidth_budget/cav_num)
+        sparse_trans_bev = self.build_sparse_transmitted_bev(selected_granularity_indices,
+                                                             collab_bev_data_list[:, :self.C_V, :, :],
+                                                             collab_bev_data_list[:, self.C_V:self.C_V + self.C_F, :, :],
+                                                             collab_bev_data_list[:, self.C_V + self.C_F:self.C_V + self.C_F + self.C_D, :, :])
+
+        # for i, utility_map_i in enumerate(utility_map_list):  # 遍历每个协作方的效用图
+        #     # utility_map_i: [1, H, W, 3] (假设batch_size为1)
+        #     print("utility_map_i.shape=",utility_map_i.shape)
+        #     # 1. 进行选择 (这是核心的背包问题或其近似)
+        #     selected_granularity_indices_i = self.selection_mechanism(utility_map_i, bandwidth_budget / cav_num)  # 简单均分预算
+        #     all_selected_indices.append(selected_granularity_indices_i)
+        #
+        #     # 2. 构建稀疏传输图
+        #     collab_data = collab_bev_data_list[i]
+        #     sparse_trans_bev_i = self.build_sparse_transmitted_bev(
+        #         selected_granularity_indices_i,
+        #         collab_data[:self.C_V, :, :],
+        #         collab_data[self.C_V:self.C_V+self.C_F, :, :],
+        #         collab_data[self.C_V+self.C_F:self.C_V+self.C_F+self.C_D, :, :]
+        #     )
+        #     all_sparse_trans_bevs.append(sparse_trans_bev_i)
+
+        # 返回所有协作方选择传输的稀疏BEV图列表，以及选择的索引（用于可能的损失计算或分析）
+        return sparse_trans_bev, selected_granularity_indices
+
+
+
+#后续要补全：对每个粒度的带宽衡量
 class UtilityNetwork(nn.Module):
     def __init__(self, collab_bev_channels,
                  granularity_coeff_dim,  # X_C^{(i)} 的维度 (例如3)

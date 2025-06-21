@@ -66,7 +66,7 @@ class How2commPreprocess(nn.Module):
             sparse_history_list.append(sparse_history)
 
         sparse_history = torch.cat(sparse_history_list, dim=0)
-        return all_agents_sparse_transmitted_data,  total_loss, sparse_history
+        return all_agents_sparse_transmitted_data, total_loss, sparse_history
 
     def forward(self, fused_curr, fused_history, record_len, backbone=None, heads=None):
         vox_curr, feat_curr, det_curr = fused_curr

@@ -321,17 +321,7 @@ class How2comm(nn.Module):
                             all_agents_sparse_transmitted_data, total_loss, sparse_history = self.how2comm.communication(
                             vox_bev,x,det_bev,record_len,history_vox_list,history_list,history_det_list,temp_psm_list)
 
-                            voxel_bev = torch.stack(voxel_bev, dim=0)
-                            print("voxel_bev的形状是:", voxel_bev)
-                            # 多模态特征融合
-                            print('x.shape=', x.shape, ", voxel_bev.shape=", voxel_bev.shape)
-                            x = torch.cat([x, voxel_bev], dim=1)
-                            x = self.channel_fuse(x)
 
-                            x = F.interpolate(sparse_feats, scale_factor=1, mode='bilinear', align_corners=False)
-                            x = self.channel_fuse(x)
-                            his = F.interpolate(sparse_history, scale_factor=1, mode='bilinear', align_corners=False)
-                            his = self.channel_fuse(his)
                         else:
                             communication_rates = torch.tensor(0).to(x.device)
                             commu_loss = torch.zeros(1).to(x.device)
@@ -341,79 +331,20 @@ class How2comm(nn.Module):
                 batch_node_features = self.regroup(x, record_len)
                 batch_node_features_his = self.regroup(his, record_len)
 
-                x_fuse = []
-                x_temporal = []
-                x_exclusive = []
-                x_common = []
+
                 for b in range(B):
                     N = record_len[b]
                     t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
                     node_features = batch_node_features[b]
                     node_features_his = batch_node_features_his[b]
-                    if i == 0:
-                        neighbor_feature = node_features 
-                        neighbor_feature_his = node_features_his
-                        neighbor_psm = warp_affine_simple(
-                            confidence_maps[b], t_matrix[0, :, :, :], (H, W))
-                        
-                    else:
-                        C, H, W = node_features.shape[1:]  
-                        neighbor_feature = warp_affine_simple(node_features,
-                                                              t_matrix[0,
-                                                                       :, :, :],
-                                                              (H, W))
-                        neighbor_feature_his = warp_affine_simple(node_features_his,
-                                                              t_matrix[0,
-                                                                       :, :, :],
-                                                              (H, W)) 
+                    final_fused_bev, hcmgf_ss_losses = self.hcmgfs_fuser(
+                        node_features,
+                        node_features_his,
+                        collab_uncertainties,
+                        collab_consistency
+                    )
 
-                    feature_shape = neighbor_feature.shape
-                    padding_len = self.max_cav - feature_shape[0]
-                    padding_feature = torch.zeros(padding_len, feature_shape[1],
-                                                  feature_shape[2], feature_shape[3])
-                    padding_feature = padding_feature.to(
-                        neighbor_feature.device)
-                    neighbor_feature = torch.cat([neighbor_feature, padding_feature],
-                                                 dim=0)
 
-                    if i == 0:
-                        padding_map = torch.zeros(
-                            padding_len, 1, feature_shape[2], feature_shape[3])
-                        padding_map = padding_map.to(neighbor_feature.device)
-                        neighbor_psm = torch.cat(
-                            [neighbor_psm, padding_map], dim=0)
-                        neighbor_psm_list.append(neighbor_psm)
-                        
-                    if self.agg_mode == "STCFormer":
-                        fusion, output_list = self.fuse_modules[i](neighbor_feature, neighbor_psm_list[b], neighbor_feature_his, i)
-                        x_fuse.append(fusion)
-                        x_temporal.append(output_list[0])
-                        x_exclusive.append(output_list[1])
-                        x_common.append(output_list[2])
-
-                x_fuse = torch.stack(x_fuse)
-                x_temporal = torch.stack(x_temporal)
-                x_exclusive = torch.stack(x_exclusive)
-                x_common = torch.stack(x_common)
-
-                if len(backbone.deblocks) > 0:
-                    ups.append(backbone.deblocks[i](x_fuse))
-                    ups_temporal.append(backbone.deblocks[i](x_temporal))
-                    ups_exclusive.append(backbone.deblocks[i](x_exclusive))
-                    ups_common.append(backbone.deblocks[i](x_common))
-                else:
-                    ups.append(x_fuse)
-
-            if len(ups) > 1:
-                x_fuse = torch.cat(ups, dim=1)
-                x_temporal = torch.cat(ups_temporal, dim=1)
-                x_exclusive = torch.cat(ups_exclusive, dim=1)
-                x_common = torch.cat(ups_common, dim=1)
-            elif len(ups) == 1:
-                x_fuse = ups[0]
-
-            if len(backbone.deblocks) > self.num_levels:
-                x_fuse = backbone.deblocks[-1](x_fuse)
                 
         return x_fuse, communication_rates, {}, offset_loss, commu_loss, None, [x_temporal, x_exclusive, x_common]
 

@@ -45,7 +45,7 @@ class PointPillarHow2comm(nn.Module):
 
         self.fusion_net = How2comm(args['fusion_args'], args)
         self.frame = args['fusion_args']['frame']
-        self.delay = 1
+        self.delay = 3
         self.discrete_ratio = args['fusion_args']['voxel_size'][0]
         self.downsample_rate = args['fusion_args']['downsample_rate']
         self.multi_scale = args['fusion_args']['multi_scale']
@@ -56,6 +56,9 @@ class PointPillarHow2comm(nn.Module):
                                   kernel_size=1)
         if args['backbone_fix']:
             self.backbone_fix()
+
+        self.history_max_len = args.get("history_max_len", 10)
+
 
     def backbone_fix(self):
         """
@@ -156,6 +159,7 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
         history_feature = transform_feature(regroup_feature_list_large, self.delay)
+        print("len(history_feature)=",len(history_feature))
         history_vox = transform_feature(regroup_vox_list, self.delay)
         history_det = transform_feature(regroup_det_list, self.delay)
         spatial_features = feature_list[0]
