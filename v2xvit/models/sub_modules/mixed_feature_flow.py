@@ -138,7 +138,7 @@ class TemporalContextEncoder(nn.Module):
         return bev_final
 
 class BEVFlowPredictor(nn.Module):
-    def __int__(self, D_short_ctx, D_long_ctx, D_current_feat,
+    def __init__(self, D_short_ctx, D_long_ctx, D_current_feat,
                 D_hidden, num_flow_channels=2, num_uncertainty_channels=1):
         super().__init__()
         input_channels = D_current_feat
