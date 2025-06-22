@@ -212,7 +212,7 @@ class How2comm(nn.Module):
 
         if short_history and long_history:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(fused_bev, short_history, long_history, record_len)
+            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(fused_bev, short_history, long_history, record_len, 1)
             x = torch.cat([comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t] ,dim=1)
         else:
             offset_loss = torch.zeros(1).to(x.device)
