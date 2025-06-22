@@ -107,7 +107,7 @@ class PointPillarHow2comm(nn.Module):
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
-
+            print("record_len=", record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
@@ -136,11 +136,11 @@ class PointPillarHow2comm(nn.Module):
             spatial_features = batch_dict['spatial_features']
             feature_list.append(spatial_features)
             feature_2d_list.append(spatial_features_2d)
-            print("feature_2d_list.len=",len(feature_2d_list))
+
             matrix_list.append(pairwise_t_matrix)
             regroup_feature_list.append(self.regroup(
                 spatial_features_2d, record_len))
-            print("regroup_feature_list.len=",len(regroup_feature_list))
+
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
 
