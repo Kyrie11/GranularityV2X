@@ -125,7 +125,7 @@ class PointPillarHow2comm(nn.Module):
             batch_dict = self.backbone(batch_dict)
             # N, C, H', W'
             spatial_features_2d = batch_dict['spatial_features_2d']
-
+            print("spatial_features_2d.shape=", spatial_features_2d.shape)
             # downsample feature to reduce memory
             if self.shrink_flag:
                 spatial_features_2d = self.shrink_conv(spatial_features_2d)
