@@ -9,8 +9,7 @@ from v2xvit.models.sub_modules.downsample_conv import DownsampleConv
 from v2xvit.models.sub_modules.naive_compress import NaiveCompressor
 from v2xvit.models.fuse_modules.how2comm_deformable import How2comm
 import torch
-from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from v2xvit.models.sub_modules.mixed_feature_flow import MultiGranularityBevDelayCompensation
+
 
 
 def transform_feature(feature_list, delay):
@@ -21,7 +20,7 @@ class PointPillarHow2comm(nn.Module):
     def __init__(self, args):
         super(PointPillarHow2comm, self).__init__()
 
-        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
+
 
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
                                     num_point_features=4,

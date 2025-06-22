@@ -8,12 +8,13 @@ from torch import batch_norm, einsum
 from einops import rearrange, repeat
 from icecream import ic
 
-from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
 from v2xvit.models.comm_modules.communication import Communication
 from v2xvit.models.sub_modules.how2comm_preprocess import How2commPreprocess
 from v2xvit.models.fuse_modules.stcformer import STCFormer
 from v2xvit.models.sub_modules.pillar_vfe import PillarVFE
 from v2xvit.models.sub_modules.point_pillar_scatter import PointPillarScatter
+from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
+from v2xvit.models.sub_modules.mixed_feature_flow import MultiGranularityBevDelayCompensation
 
 
 class VoxelProjector(nn.Module):
@@ -186,7 +187,7 @@ class How2comm(nn.Module):
             bev_channels=64 if 'num_filters' not in args else args['num_filters'][0],
             voxel_size=args['voxel_size'][0]
         )
-
+        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
         # self.hierarchical_fusion = HierarchicalFusion(args['mgdc_bev_args'])
 
     def regroup(self, x, record_len):
