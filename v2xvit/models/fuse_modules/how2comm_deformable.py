@@ -187,7 +187,7 @@ class How2comm(nn.Module):
             voxel_size=args['voxel_size'][0]
         )
 
-        self.hierarchical_fusion = HierarchicalFusion(args['mgdc_bev_args'])
+        # self.hierarchical_fusion = HierarchicalFusion(args['mgdc_bev_args'])
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
