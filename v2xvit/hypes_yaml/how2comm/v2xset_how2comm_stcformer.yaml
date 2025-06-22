@@ -153,6 +153,15 @@ model:
         compressed_dim: 2  
       only_ego: False
 
+    mgdc_bev_args:
+      C_V: 10
+      C_F: 64
+      C_D: 14
+      D_short_ctx_per_granularity: 3
+      D_long_ctx_per_granularity: 3
+      num_short_history_frames: 3
+      num_long_history_frames: 3
+      flow_predictor_hidden_dim: 16
 
 loss:
   core_method: point_pillar_loss
