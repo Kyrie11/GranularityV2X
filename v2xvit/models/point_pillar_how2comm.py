@@ -136,11 +136,11 @@ class PointPillarHow2comm(nn.Module):
             spatial_features = batch_dict['spatial_features']
             feature_list.append(spatial_features)
             feature_2d_list.append(spatial_features_2d)
-
+            print("feature_2d_list.len=",len(feature_2d_list))
             matrix_list.append(pairwise_t_matrix)
             regroup_feature_list.append(self.regroup(
                 spatial_features_2d, record_len))
-
+            print("regroup_feature_list.len=",len(regroup_feature_list))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
 
