@@ -164,12 +164,12 @@ class BEVFlowPredictor(nn.Module):
         nn.init.zeros_(self.flow_head.weight)
         if self.flow_head.bias is not None: nn.init.zeros_(self.flow_head.bias)
 
-    def forward(self, current_F_cat_t0, short_term_ctx, long_term_ctx, delay_scalar_map):
-        # current_F_cat_t0: [B, C_V+C_F+C_D, H, W]
+    def forward(self, current_F_cat, short_term_ctx, long_term_ctx, delay_scalar_map):
+        # current_F_cat: [B, C_V+C_F+C_D, H, W]
         # short_term_ctx: [B, D_short_ctx, H, W] or None
         # long_term_ctx: [B, D_long_ctx, H, W] or None (can be global vector tiled too)
         # delay_scalar_map: [B, 1, H, W]
-        input_list = [current_F_cat_t0]
+        input_list = [current_F_cat]
         if short_term_ctx is not None:
             # Long-term context can modulate short-term context
             if long_term_ctx is not None:
@@ -251,77 +251,80 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         self.flow_predictor = BEVFlowPredictor(
             total_short_ctx_dim,
             total_long_ctx_dim,
-            self.C_V + self.C_F + self.C_D,  # Channels of current concatenated F_t0
+            self.C_V + self.C_F + self.C_D,  # Channels of current concatenated F
             args_mgdc_bev['flow_predictor_hidden_dim']
         )
         self.feature_warper = FeatureWarper()
 
-    def forward(self,
-                current_F_vox_t0, current_F_feat_t0, current_F_det_bev_t0,  # [B,C,H,W] or None
-                short_history_vox, short_history_feat, short_history_det,  # list of [B,C,H,W]
-                long_history_vox, long_history_feat, long_history_det,  # list of [B,C,H,W]
-                delay_time_span_scalar
-                ):
+    def regroup(self, x, record_len):
+        cum_sum_len = torch.cumsum(record_len, dim=0)
+        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
+        return split_x
 
-        b, _, h, w = current_F_vox_t0.shape if current_F_vox_t0 is not None else \
-                    current_F_feat_t0.shape if current_F_feat_t0 is not None else \
-                    current_F_det_bev_t0.shape
+    def forward(self,fused_bev_curr, short_history, long_history,
+                record_len, delay_time_span_scalar):
+        compensated_F_vox_t_list , compensated_F_feat_t_list , compensated_F_det_bev_t_list = [], [], []
+        current_F_vox, current_F_feat, current_F_det_bev = fused_bev_curr
+        current_F_vox, current_F_feat, current_F_det_bev = self.regroup(current_F_vox, record_len), self.regroup(current_F_feat, record_len),self.regroup(current_F_det_bev, record_len)
+        B = len(current_F_vox)
+        print("len(current_F_vox)=",len(current_F_vox))
+        short_history_vox, short_history_feat, short_history_det = short_history
+        print("len(short_history_vox)=", len(short_history_vox))
+        long_history_vox, long_history_feat, long_history_det = long_history
 
-        if self.C_V > 0 and self.num_short_history > 0 and short_history_vox:
-            s_ctx_vox = self.short_encoder_vox(short_history_vox)
-        if self.C_F > 0 and self.num_short_history > 0 and short_history_feat:
-            s_ctx_feat = self.short_encoder_feat(short_history_feat)
-        if self.C_D > 0 and self.num_short_history > 0 and short_history_det:
-            s_ctx_det = self.short_encoder_det(short_history_det)
+        for bs in range(B):
+            cav_num, _, h, w = current_F_vox[bs].shape
+            if cav_num == 1: #没有协作车辆只有ego-vehicle
+                compensated_F_vox_t_list.append(current_F_vox[bs])
+                compensated_F_feat_t_list.append(current_F_feat[bs])
+                compensated_F_det_bev_t_list.append(current_F_det_bev[bs])
+                continue
 
-        short_term_contexts = [c for c in [s_ctx_vox, s_ctx_feat, s_ctx_det] if c is not None]
-        if short_term_contexts:
+            s_vox, s_feat, s_det = short_history_vox[bs], short_history_feat[bs], short_history_det[bs]
+            s_ctx_vox = self.short_encoder_vox(s_vox)
+            s_ctx_feat = self.short_encoder_feat(s_feat)
+            s_ctx_det = self.short_encoder_det(s_det)
+
+            short_term_contexts = [c for c in [s_ctx_vox, s_ctx_feat, s_ctx_det] if c is not None]
             full_short_ctx = torch.cat(short_term_contexts, dim=1)
-        else:  # No short history processed
-            full_short_ctx = None  # Or zeros: torch.zeros(b, 0, h, w, device=...)
 
-        # Encode long-term history
-        l_ctx_vox, l_ctx_feat, l_ctx_det = None, None, None
-        if self.C_V > 0 and self.num_long_history > 0 and long_history_vox:
-            l_ctx_vox = self.long_encoder_vox(long_history_vox)
-        if self.C_F > 0 and self.num_long_history > 0 and long_history_feat:
-            l_ctx_feat = self.long_encoder_feat(long_history_feat)
-        if self.C_D > 0 and self.num_long_history > 0 and long_history_det:
-            l_ctx_det = self.long_encoder_det(long_history_det)
+            # Encode long-term history
+            l_ctx_vox, l_ctx_feat, l_ctx_det = None, None, None
+            l_vox, l_feat, l_det = long_history_vox[bs], long_history_feat[bs], long_history_det[bs]
+            l_ctx_vox = self.long_encoder_vox(l_vox)
+            l_ctx_feat = self.long_encoder_feat(l_feat)
+            l_ctx_det = self.long_encoder_det(l_det)
 
-        long_term_contexts = [c for c in [l_ctx_vox, l_ctx_feat, l_ctx_det] if c is not None]
-        if long_term_contexts:
+            long_term_contexts = [c for c in [l_ctx_vox, l_ctx_feat, l_ctx_det] if c is not None]
             full_long_ctx = torch.cat(long_term_contexts, dim=1)
-        else:  # No long history processed
-            full_long_ctx = None  # Or zeros
 
             # Prepare current features and delay map
             current_F_parts = []
-            if current_F_vox_t0 is not None:
-                current_F_parts.append(current_F_vox_t0)
+            if current_F_vox[bs] is not None:
+                current_F_parts.append(current_F_vox[bs])
             else:
-                current_F_parts.append(torch.zeros(b, self.C_V, h, w,
+                current_F_parts.append(torch.zeros(cav_num, self.C_V, h, w,
                                                    device=l_ctx_vox.device if l_ctx_vox is not None else (
                                                        s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))  # Add zeros if None
 
-            if current_F_feat_t0 is not None:
-                current_F_parts.append(current_F_feat_t0)
+            if current_F_feat[bs] is not None:
+                current_F_parts.append(current_F_feat[bs])
             else:
-                current_F_parts.append(torch.zeros(b, self.C_F, h, w,
+                current_F_parts.append(torch.zeros(cav_num, self.C_F, h, w,
                                                    device=l_ctx_vox.device if l_ctx_vox is not None else (
                                                        s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
 
-            if current_F_det_bev_t0 is not None:
-                current_F_parts.append(current_F_det_bev_t0)
+            if current_F_det_bev[bs] is not None:
+                current_F_parts.append(current_F_det_bev[bs])
             else:
-                current_F_parts.append(torch.zeros(b, self.C_D, h, w,
+                current_F_parts.append(torch.zeros(cav_num, self.C_D, h, w,
                                                    device=l_ctx_vox.device if l_ctx_vox is not None else (
                                                        s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
 
-            current_F_cat_t0 = torch.cat(current_F_parts, dim=1)
+            current_F_cat = torch.cat(current_F_parts, dim=1)
 
-            delay_map = torch.full((b, 1, h, w), delay_time_span_scalar,
-                                   device=current_F_cat_t0.device, dtype=current_F_cat_t0.dtype)
+            delay_map = torch.full((cav_num, 1, h, w), delay_time_span_scalar,
+                                   device=current_F_cat.device, dtype=current_F_cat.dtype)
 
             # Predict flow and uncertainty
             # The BEVFlowPredictor needs to handle None for full_short_ctx or full_long_ctx
@@ -333,7 +336,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
                                       (self.C_V + self.C_F + self.C_D) - 1 - \
                                       (full_long_ctx.shape[1] if full_long_ctx is not None else 0)
                 if total_short_ctx_dim > 0:
-                    full_short_ctx = torch.zeros(b, total_short_ctx_dim, h, w, device=current_F_cat_t0.device)
+                    full_short_ctx = torch.zeros(cav_num, total_short_ctx_dim, h, w, device=current_F_cat.device)
                 else:  # This case implies D_short_ctx was 0
                     full_short_ctx = None
 
@@ -342,29 +345,33 @@ class MultiGranularityBevDelayCompensation(nn.Module):
                                      (self.C_V + self.C_F + self.C_D) - 1 - \
                                      (full_short_ctx.shape[1] if full_short_ctx is not None else 0)
                 if total_long_ctx_dim > 0:
-                    full_long_ctx = torch.zeros(b, total_long_ctx_dim, h, w, device=current_F_cat_t0.device)
+                    full_long_ctx = torch.zeros(cav_num, total_long_ctx_dim, h, w, device=current_F_cat.device)
                 else:
                     full_long_ctx = None
 
             flow_field, uncertainty_map = self.flow_predictor(
-                current_F_cat_t0, full_short_ctx, full_long_ctx, delay_map
+                current_F_cat, full_short_ctx, full_long_ctx, delay_map
             )
 
             # Warp features
             compensated_F_vox_t, compensated_F_feat_t, compensated_F_det_bev_t = None, None, None
-            if current_F_vox_t0 is not None:
-                compensated_F_vox_t = self.feature_warper.flow_warp(current_F_vox_t0, flow_field,
+            if current_F_vox is not None:
+                compensated_F_vox_t = self.feature_warper.flow_warp(current_F_vox, flow_field,
                                                                     delay_time_span_scalar)
                 compensated_F_vox_t = compensated_F_vox_t * (1 - uncertainty_map)
-            if current_F_feat_t0 is not None:
-                compensated_F_feat_t = self.feature_warper.flow_warp(current_F_feat_t0, flow_field,
+            compensated_F_vox_t_list.append(compensated_F_vox_t)
+
+            if current_F_feat is not None:
+                compensated_F_feat_t = self.feature_warper.flow_warp(current_F_feat, flow_field,
                                                                      delay_time_span_scalar)
                 compensated_F_feat_t = compensated_F_feat_t * (1 - uncertainty_map)
-            if current_F_det_bev_t0 is not None:
-                compensated_F_det_bev_t = self.feature_warper.flow_warp(current_F_det_bev_t0, flow_field,
+            compensated_F_feat_t_list.append(compensated_F_feat_t)
+
+            if current_F_det_bev is not None:
+                compensated_F_det_bev_t = self.feature_warper.flow_warp(current_F_det_bev, flow_field,
                                                                         delay_time_span_scalar)
                 compensated_F_det_bev_t = compensated_F_det_bev_t * (1 - uncertainty_map)
-
+            compensated_F_det_bev_t_list.append(compensated_F_det_bev_t)
             # Note: Spatial transformation to ego frame is not explicitly done here.
             # It's assumed that the flow_field implicitly learns to predict motion
             # such that when warped, features are pseudo-aligned to where they *would be*
@@ -375,7 +382,10 @@ class MultiGranularityBevDelayCompensation(nn.Module):
             # to output flow in a "common" or "ego-aligned" sense if training data supports it.
             # This is a subtle but important point. Usually, flow is in pixel space of the input.
 
-            return compensated_F_vox_t, compensated_F_feat_t, compensated_F_det_bev_t, uncertainty_map
+        compensated_F_vox_t_list = torch.cat(compensated_F_vox_t_list, dim=0)
+        compensated_F_feat_t_list = torch.cat(compensated_F_feat_t_list, dim=0)
+        compensated_F_det_bev_t_list = torch.cat(compensated_F_det_bev_t_list, dim=0)
+        return compensated_F_vox_t_list, compensated_F_feat_t_list, compensated_F_det_bev_t_list, uncertainty_map
 
 
 

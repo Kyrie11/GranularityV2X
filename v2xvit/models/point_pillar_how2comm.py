@@ -10,6 +10,7 @@ from v2xvit.models.sub_modules.naive_compress import NaiveCompressor
 from v2xvit.models.fuse_modules.how2comm_deformable import How2comm
 import torch
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
+from v2xvit.models.sub_modules.mixed_feature_flow import MultiGranularityBevDelayCompensation
 
 
 def transform_feature(feature_list, delay):
@@ -58,6 +59,8 @@ class PointPillarHow2comm(nn.Module):
             self.backbone_fix()
 
         self.history_max_len = args.get("history_max_len", 10)
+
+        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
 
 
     def backbone_fix(self):
@@ -138,14 +141,14 @@ class PointPillarHow2comm(nn.Module):
             feature_list.append(spatial_features)
             feature_2d_list.append(spatial_features_2d)
             # print("feature_2d_list.len=",len(feature_2d_list))
-            print("spatial_feature2d.shape=",spatial_features_2d.shape)
+            # print("spatial_feature2d.shape=",spatial_features_2d.shape)
             matrix_list.append(pairwise_t_matrix)
             regroup_feature_list.append(self.regroup(
                 spatial_features_2d, record_len))
             # print("regroup_feature_list.len=",len(regroup_feature_list))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
-            print("regroup_feature_list_large.shape=",regroup_feature_list_large[-1][0].shape)
+            # print("regroup_feature_list_large.shape=",regroup_feature_list_large[-1][0].shape)
 
             vox_bev = batch_dict['vox_bev']
             #下采样

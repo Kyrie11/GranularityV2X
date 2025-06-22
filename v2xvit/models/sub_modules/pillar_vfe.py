@@ -147,7 +147,7 @@ class PillarVFE(nn.Module):
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
-        print("voxel_coords.shape:",coords.shape)
+        # print("voxel_coords.shape:",coords.shape)
         points_mean = \
             voxel_features[:, :, :3].sum(dim=1, keepdim=True) / \
             voxel_num_points.type_as(voxel_features).view(-1, 1, 1)

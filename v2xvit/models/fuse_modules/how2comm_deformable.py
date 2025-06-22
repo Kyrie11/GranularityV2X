@@ -209,26 +209,21 @@ class How2comm(nn.Module):
                                                          2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
 
-        if history and self.async_flag: 
-            feat_final, offset_loss = self.how2comm(fused_bev, history, record_len, backbone, heads)
-            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(
-            #
-            )
-            x = feat_final
+        if short_history and long_history:
+            # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
+            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(fused_bev, short_history, long_history, record_len)
+            x = torch.cat([comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t] ,dim=1)
         else:
             offset_loss = torch.zeros(1).to(x.device)
         neighbor_psm_list = []
-        if history:
-            his_vox, his, his_det = history[0][0],history[1][0],history[2][0]
-        else:
-            his_vox, his, his_det = vox_bev, x, det_bev
+
         if self.multi_scale:
             ups = []
             ups_temporal = []
             ups_exclusive = []
             ups_common = []
             with_resnet = True if hasattr(backbone, 'resnet') else False
-            print("his.shape=", his.shape)
+            # print("his.shape=", his.shape)
             if with_resnet:
                 feats = backbone.resnet(x)
                 history_feats = backbone.resnet(his)
