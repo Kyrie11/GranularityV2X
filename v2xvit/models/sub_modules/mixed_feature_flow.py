@@ -248,10 +248,8 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         if self.C_D > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
 
         self.flow_predictor = BEVFlowPredictor(
-            total_short_ctx_dim,
-            total_long_ctx_dim,
-            self.C_V + self.C_F + self.C_D,  # Channels of current concatenated F
-           16
+            D_short_ctx=total_short_ctx_dim, D_long_ctx=total_long_ctx_dim,D_current_feat=self.C_V + self.C_F + self.C_D,
+            D_hidden=args_mgdc_bev['flow_predictor_hidden_dim']
         )
         self.feature_warper = FeatureWarper()
 
