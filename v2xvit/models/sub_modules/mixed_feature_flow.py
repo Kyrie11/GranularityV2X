@@ -251,7 +251,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
             total_short_ctx_dim,
             total_long_ctx_dim,
             self.C_V + self.C_F + self.C_D,  # Channels of current concatenated F
-            args_mgdc_bev['flow_predictor_hidden_dim']
+           16
         )
         self.feature_warper = FeatureWarper()
 
