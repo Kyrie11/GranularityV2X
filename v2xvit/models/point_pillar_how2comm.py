@@ -21,6 +21,8 @@ class PointPillarHow2comm(nn.Module):
     def __init__(self, args):
         super(PointPillarHow2comm, self).__init__()
 
+        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
+
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
                                     num_point_features=4,
                                     voxel_size=args['voxel_size'],
@@ -60,7 +62,7 @@ class PointPillarHow2comm(nn.Module):
 
         self.history_max_len = args.get("history_max_len", 10)
 
-        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
+
 
 
     def backbone_fix(self):
