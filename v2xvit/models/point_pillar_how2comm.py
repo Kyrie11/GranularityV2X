@@ -91,6 +91,7 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, data_dict_list):
+        print("len(data_dict_list)=", len(data_dict_list))
         batch_dict_list = []
         feature_list = []
         feature_2d_list = []
@@ -144,7 +145,7 @@ class PointPillarHow2comm(nn.Module):
             # print("regroup_feature_list.len=",len(regroup_feature_list))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
-            print("regroup_feature_list_large.shape=",regroup_feature_list_large[-1].shape)
+            print("regroup_feature_list_large.shape=",regroup_feature_list_large[-1][0].shape)
 
             vox_bev = batch_dict['vox_bev']
             #下采样
