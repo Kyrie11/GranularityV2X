@@ -194,7 +194,7 @@ class How2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, fused_bev, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None):
+    def forward(self, fused_bev, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, short_history=None, long_history=None):
         vox_bev, x, det_bev = fused_bev
         _, _, H, W = x.shape
         pairwise_t_matrix_4d = pairwise_t_matrix
@@ -211,6 +211,9 @@ class How2comm(nn.Module):
 
         if history and self.async_flag: 
             feat_final, offset_loss = self.how2comm(fused_bev, history, record_len, backbone, heads)
+            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(
+            #
+            )
             x = feat_final
         else:
             offset_loss = torch.zeros(1).to(x.device)

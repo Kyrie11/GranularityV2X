@@ -1,264 +1,51 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.ops import RoIAlign
+from torchvision.ops import RoIAlign  # For ObjectContextExtractor
 
+
+# Assuming BasicConvBlock and other utilities are defined elsewhere or standard
+# from v2xvit.models.sub_modules.your_blocks import BasicConvBlock, ResNetBEVBackbone, ReduceInfTC
+# For now, I'll use placeholders or simplified versions.
+class SEBlock(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super(SEBlock, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class BasicConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, use_bn=True, use_relu=True):
+        super(BasicConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=not use_bn)
+        self.bn = nn.BatchNorm2d(out_channels) if use_bn else nn.Identity()
+        self.relu = nn.ReLU(inplace=True) if use_relu else nn.Identity()
+
+    def forward(self, x):
+        return self.relu(self.bn(self.conv(x)))
+
+
+# --- Helper: Patch Embedding and Tokenizer ---
 class BEVPatchEmbed(nn.Module):
     def __init__(self, C_in, embed_dim, patch_size):
         super().__init__()
         self.proj = nn.Conv2d(C_in, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        x = self.proj(x) # [B, E, H', W']
-        return x.flatten(2).transpose(1,2) # [B, H'*W', E]
+        x = self.proj(x)  # [B, E, H', W']
+        return x.flatten(2).transpose(1, 2)  # [B, H'*W', E]
 
-class MixedHistoryTokenizer(nn.Module):
-    def __init__(self, C_total_list, embed_dim, patch_size, max_seq_len,
-                    num_recent_frames, num_distant_frames):
-        super().__init__()
-        self.patch_embed = BEVPatchEmbed(C_total_list, embed_dim, patch_size)
-        self.max_seq_len = max_seq_len
-
-        #learnable embeddings
-        self.pos_embed = nn.Parameter(torch.randn(1, max_seq_len, embed_dim)) #Positional for flattened sequence
-        self.time_embed = nn.Embedding(num_recent_frames+num_distant_frames+1, embed_dim) #+1 for Safety
-        self.seq_type_embed = nn.Embedding(2, embed_dim) #0 for recent, 1 for distant
-
-        #Store these for mapping global time index to local embedding index
-        self.num_recent_frames = num_recent_frames
-        self.num_distant_frames = num_distant_frames
-
-    def forward(self, historical_X_j_list_with_time_info):
-        # historical_X_j_list_with_time_info: list of tuples
-        # each tuple: (X_j_k [1, C_total, H, W], global_time_idx_k, seq_type_idx_k [0 or 1])
-        # seq_type_idx_k: 0 for recent, 1 for distant
-        # global_time_idx_k: unique index for each historical frame to feed time_embed
-
-        all_tokens = []
-        time_embeddings_to_add = []
-        seq_type_embeddings_to_add = []
-
-        current_token_count = 0
-        for x_bev_k, time_idx_k, seq_type_k in historical_X_j_list_with_time_info:
-            tokens_k = self.patch_embed(x_bev_k)  # [1, num_patches_k, E]
-            num_patches_k = tokens_k.shape[1]
-
-            if current_token_count + num_patches_k > self.max_seq_len:
-                # Truncate if exceeding max_seq_len (simple strategy)
-                tokens_k = tokens_k[:, :self.max_seq_len - current_token_count, :]
-                num_patches_k = tokens_k.shape[1]
-                if num_patches_k == 0: continue
-
-            all_tokens.append(tokens_k.squeeze(0))  # Remove batch dim [num_patches_k, E]
-
-            # Prepare embeddings to add (broadcast to num_patches_k)
-            time_emb = self.time_embed(torch.tensor(time_idx_k, device=x_bev_k.device)).unsqueeze(0).repeat(
-                num_patches_k, 1)
-            seq_type_emb = self.seq_type_embed(torch.tensor(seq_type_k, device=x_bev_k.device)).unsqueeze(0).repeat(
-                num_patches_k, 1)
-
-            time_embeddings_to_add.append(time_emb)
-            seq_type_embeddings_to_add.append(seq_type_emb)
-            current_token_count += num_patches_k
-
-        if not all_tokens:  # Should not happen if history is provided
-            # Return a dummy sequence or handle error
-            # For now, let's assume it won't be empty.
-            # If it can be, need a robust way to handle this (e.g., return None and skip compensation)
-            return torch.empty(0, self.pos_embed.shape[-1], device=self.pos_embed.device), \
-                torch.empty(0, dtype=torch.long, device=self.pos_embed.device)
-
-        # Concatenate all tokens and their respective embeddings
-        final_tokens = torch.cat(all_tokens, dim=0)  # [Total_Patches, E]
-        final_time_embed = torch.cat(time_embeddings_to_add, dim=0)
-        final_seq_type_embed = torch.cat(seq_type_embeddings_to_add, dim=0)
-
-        # Add all embeddings
-        final_tokens = final_tokens + self.pos_embed[:, :final_tokens.shape[0], :] + \
-                       final_time_embed + final_seq_type_embed
-
-        # Store patch counts for easy reshaping later
-        # (This part is tricky if patch counts per frame vary and we need to reconstruct per-frame maps from T_out)
-        # For H_short, z_long, z_obj, we need to know which tokens in T_out correspond to which original frame/type.
-        # A simpler way might be to pass indices or masks.
-        # For now, let's assume the decoders can handle a flat T_out and use masks/indices if needed.
-        # An alternative: return T_out and a list of (start_idx, end_idx, seq_type) for each frame's tokens in T_out.
-
-        # Let's return the flattened tokens and a list indicating token origins
-        token_origins = []  # list of (start_idx, num_patches, seq_type_k, original_time_idx_k)
-        start_idx = 0
-        for i, (x_bev_k, time_idx_k, seq_type_k) in enumerate(historical_X_j_list_with_time_info):
-            # Recalculate num_patches after potential truncation
-            # This is complex if truncation happened mid-list.
-            # A fixed number of patches per frame simplifies this, or padding.
-            # For now, assume patch_embed output is consistent or handled.
-            # This part needs careful implementation of how tokens are mapped back.
-            # Let's assume for now that the decoders get the full T_out and select based on seq_type.
-            pass  # Placeholder for more complex token origin tracking
-
-        return final_tokens.unsqueeze(0), None  # [1, Total_Patches, E], Placeholder for origin info
-
-        # --- Transformer Encoder ---
-
-    class TemporalTransformerEncoder(nn.Module):
-        def __init__(self, embed_dim, num_heads, num_layers, dim_feedforward, dropout=0.1):
-            super().__init__()
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=embed_dim, nhead=num_heads, dim_feedforward=dim_feedforward,
-                dropout=dropout, batch_first=True  # Important: batch_first=True
-            )
-            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        def forward(self, src_tokens):  # src_tokens: [B, SeqLen, E]
-            return self.transformer_encoder(src_tokens)
-
-        # --- Context Decoders ---
-
-    class ShortTermDecoder(nn.Module):  # Decodes T_out to H_short
-        def __init__(self, embed_dim, D_short, H_out, W_out, patch_size_ H_prime_W_prime_in_transformer
-
-        ):
-        super().__init__()
-        # This needs to know the H', W' of the token grid from patch_embed
-        # And the target H, W for H_short.
-        # Example: Transposed convolutions to upsample and reshape
-        # This is highly dependent on how tokens from recent frames are selected from T_out
-        # and how many patches there were.
-        # Simplified: assume we get a [B, NumRecentPatches, E] tensor
-        # and NumRecentPatches = H_prime * W_prime (for a single recent frame, e.g., t0)
-        self.H_prime, self.W_prime = H_prime_W_prime_in_transformer  # e.g. (H/patch_size, W/patch_size)
-        self.embed_dim = embed_dim
-        self.decoder = nn.Sequential(
-            # Example: Reshape, then ConvTranspose
-            nn.ConvTranspose2d(embed_dim, D_short * 2, kernel_size=patch_size, stride=patch_size),
-            # Upsample to original H,W
-            nn.ReLU(),
-            nn.Conv2d(D_short * 2, D_short, kernel_size=3, padding=1)
-        )
-
-    def forward(self, t_out_recent_tokens):  # [B, NumRecentPatches, E]
-        B, NumRecentPatches, E = t_out_recent_tokens.shape
-        # Assert NumRecentPatches == self.H_prime * self.W_prime
-        x = t_out_recent_tokens.transpose(1, 2).reshape(B, E, self.H_prime, self.W_prime)
-        return self.decoder(x)  # [B, D_short, H, W]
-
-
-class LongTermAggregator(nn.Module):  # Aggregates T_out to z_long
-    def __init__(self, embed_dim, D_long):
-        super().__init__()
-        # Example: Attention pooling or simple mean pooling
-        self.pooler = nn.AdaptiveAvgPool1d(1)  # Pool across sequence length
-        self.fc = nn.Linear(embed_dim, D_long)
-
-    def forward(self, t_out_distant_tokens):  # [B, NumDistantPatches, E]
-        if t_out_distant_tokens.shape[1] == 0:  # No distant tokens
-            return torch.zeros(t_out_distant_tokens.shape[0], self.fc.out_features, device=t_out_distant_tokens.device)
-        pooled = self.pooler(t_out_distant_tokens.transpose(1, 2)).squeeze(-1)  # [B, E]
-        return self.fc(pooled)  # [B, D_long]
-
-
-class ObjectContextExtractor(nn.Module):  # Extracts z_obj from T_out and F_det_bev_t0
-    def __init__(self, embed_dim, D_obj, bev_h_prime, bev_w_prime, patch_size, roi_output_size=7):
-        super().__init__()
-        self.bev_h_prime = bev_h_prime
-        self.bev_w_prime = bev_w_prime
-        self.patch_size = patch_size  # To map RoI coords to token grid
-        self.roi_align = RoIAlign((roi_output_size, roi_output_size),
-                                  spatial_scale=1.0 / patch_size,  # Scale RoI coords to token grid
-                                  sampling_ratio=-1)
-        self.fc = nn.Sequential(
-            nn.Linear(embed_dim * roi_output_size * roi_output_size, D_obj * 2),
-            nn.ReLU(),
-            nn.Linear(D_obj * 2, D_obj)
-        )
-
-    def forward(self, t_out_t0_tokens, object_rois_at_t0):
-        # t_out_t0_tokens: [1, NumT0Patches, E] (tokens from X_j^t0)
-        # object_rois_at_t0: list of [K, 5] tensors (batch_idx, x1, y1, x2, y2) for K objects in BEV pixel coords
-        # Assumes t_out_t0_tokens can be reshaped to a feature map [1, E, H', W']
-        if not object_rois_at_t0 or object_rois_at_t0[0].numel() == 0:
-            return []  # No objects or RoIs
-
-        B, NumT0Patches, E = t_out_t0_tokens.shape
-        # Assert NumT0Patches == self.bev_h_prime * self.bev_w_prime
-        feature_map_t0 = t_out_t0_tokens.transpose(1, 2).reshape(B, E, self.bev_h_prime, self.bev_w_prime)
-
-        # RoIAlign expects a list of RoIs for the batch
-        # object_rois_at_t0 is assumed to be for batch_idx 0 if B=1
-        aligned_features = self.roi_align(feature_map_t0, object_rois_at_t0)  # [NumTotalRoIs, E, roi_h, roi_w]
-        aligned_features = aligned_features.view(aligned_features.size(0), -1)  # Flatten
-
-        z_obj_list = []
-        # If object_rois_at_t0 was a list of tensors, need to split aligned_features
-        # Assuming object_rois_at_t0 is a single tensor [K, 5] for simplicity here.
-        z_objs = self.fc(aligned_features)  # [K, D_obj]
-        for i in range(z_objs.shape[0]):
-            z_obj_list.append(z_objs[i])
-        return z_obj_list
-
-    # --- Motion Predictors ---
-
-
-class ObjectMotionPredictor(nn.Module):  # MLP_obj_motion
-    def __init__(self, D_obj, D_long, D_out_affine=6):  # e.g., dx,dy,dz,droll,dpitch,dyaw or 2D: dx,dy,dtheta
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(D_obj + D_long + 1, (D_obj + D_long) * 2),  # +1 for delay
-            nn.ReLU(),
-            nn.Linear((D_obj + D_long) * 2, D_out_affine)
-        )
-
-    def forward(self, z_obj_o, z_long, delay_scalar):  # delay_scalar is (t-t0)
-        # z_obj_o: [D_obj], z_long: [D_long]
-        delay_tensor = torch.tensor([delay_scalar], device=z_obj_o.device, dtype=z_obj_o.dtype)
-        combined_input = torch.cat([z_obj_o, z_long, delay_tensor], dim=0)
-        return self.mlp(combined_input)
-
-
-class BEVMotionPredictor(nn.Module):  # Predictor_bev_motion (U-Net like)
-    def __init__(self, D_short, D_long, H_bev, W_bev, num_flow_channels=2, num_uncertainty_channels=1):
-        super().__init__()
-        # Inspired by ReduceInfTC or a simpler U-Net
-        # Input channels: D_short (from H_short) + D_long (tiled) + 1 (tiled delay)
-        # This is a placeholder, a proper U-Net is needed.
-        # Can reuse/adapt parts of the original author's ReduceInfTC if suitable
-        input_c = D_short + D_long + 1
-        self.unet_like_encoder = nn.Sequential(  # Simplified
-            BasicConvBlock(input_c, 64),
-            BasicConvBlock(64, 128, stride=2),  # Downsample
-            BasicConvBlock(128, 256, stride=2),  # Downsample
-        )
-        self.unet_like_decoder = nn.Sequential(  # Simplified
-            nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
-            BasicConvBlock(128, 128),
-            nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
-            BasicConvBlock(64, 64),
-        )
-        self.flow_head = nn.Conv2d(64, num_flow_channels, kernel_size=3, padding=1)
-        self.uncertainty_head = nn.Conv2d(64, num_uncertainty_channels, kernel_size=3, padding=1)
-
-        # Initialize flow_head to output small initial flows
-        nn.init.zeros_(self.flow_head.weight)
-        if self.flow_head.bias is not None:
-            nn.init.zeros_(self.flow_head.bias)
-
-    def forward(self, H_short, z_long, delay_scalar):  # H_short [1,D_short,H,W], z_long [1,D_long]
-        B, _, H, W = H_short.shape
-        delay_map = torch.full((B, 1, H, W), delay_scalar, device=H_short.device, dtype=H_short.dtype)
-        z_long_tiled = z_long.unsqueeze(-1).unsqueeze(-1).expand(B, -1, H, W)
-
-        combined_input = torch.cat([H_short, z_long_tiled, delay_map], dim=1)
-
-        encoded = self.unet_like_encoder(combined_input)
-        decoded = self.unet_like_decoder(encoded)
-
-        flow = self.flow_head(decoded)  # [B, 2, H, W]
-        uncertainty = torch.sigmoid(self.uncertainty_head(decoded))  # [B, 1, H, W]
-        return flow, uncertainty
-
-    # --- Feature Warper (from original author, slightly adapted) ---
-
-
+# --- Feature Warper (from original author, slightly adapted) ---
 class FeatureWarper(nn.Module):
     def get_grid(self, B, H, W, device):
         shifts_x = torch.arange(0, W, 1, dtype=torch.float32, device=device)
@@ -308,241 +95,287 @@ class FeatureWarper(nn.Module):
         )
         return warped_feats
 
-    # --- Main MGDC Module ---
-
-
-class MultiGranularityDelayCompensation(nn.Module):
-    def __init__(self, args_mgdc):  # args_mgdc should contain all sub-module configs
+class TemporalContextEncoder(nn.Module):
+    """Encodes a sequence of BEV features (single granularity)"""
+    def __init__(self, C_in_granularity, D_out_context, num_history_frames):
         super().__init__()
-        self.C_total_hist = args_mgdc['C_total_hist']  # Channel of historical X_j^k
-        self.embed_dim = args_mgdc['transformer_embed_dim']
-        patch_size = args_mgdc['patch_size']
+        if num_history_frames>0:
+            self.conv3d = nn.Conv3d(C_in_granularity, D_out_context,
+                                    kernel_size=(min(num_history_frames, 3),3,3),# Kernel depth <= num_frames
+                                    padding=(min(num_history_frames, 3)//2 if min(num_history_frames, 3)>1 else 0,1,1))
+            self.norm = nn.BatchNorm2d(D_out_context)
+            self.relu = nn.ReLU()
+            self.pool = nn.AdaptiveAvgPool3d((1,None,None)) #Pool along time dim
+        else: #No history
+            self.dummy_param = nn.Parameter(torch.empty(0))
 
-        # Assuming BEV H,W are known for patch calculations
-        self.bev_h, self.bev_w = args_mgdc['bev_shape']
-        self.h_prime = self.bev_h // patch_size
-        self.w_prime = self.bev_w // patch_size
+    def regroup(self, x, record_len):
+        cum_sum_len = torch.cumsum(record_len, dim=0)
+        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
+        return split_x
 
-        self.tokenizer = MixedHistoryTokenizer(
-            self.C_total_hist, self.embed_dim, patch_size,
-            args_mgdc['max_seq_len'],
-            args_mgdc['num_recent_frames_ks'],
-            args_mgdc['num_distant_frames_kl']
-        )
-        self.transformer_encoder = TemporalTransformerEncoder(
-            self.embed_dim, args_mgdc['transformer_num_heads'], args_mgdc['transformer_num_layers'],
-            args_mgdc['transformer_dim_feedforward']
-        )
-        self.short_term_decoder = ShortTermDecoder(
-            self.embed_dim, args_mgdc['D_short'],
-            self.bev_h, self.bev_w, patch_size, (self.h_prime, self.w_prime)
-        )
-        self.long_term_aggregator = LongTermAggregator(self.embed_dim, args_mgdc['D_long'])
+    def forward(self, history_bev_list, record_len):
+        # history_bev_list: list of [B, C_in, H, W]
+        if not history_bev_list:
+            return None
 
-        self.object_context_extractor = ObjectContextExtractor(
-            self.embed_dim, args_mgdc['D_obj'],
-            self.h_prime, self.w_prime, patch_size,
-            roi_output_size=args_mgdc.get('roi_align_output_size', 7)
-        )
-        self.object_motion_predictor = ObjectMotionPredictor(
-            args_mgdc['D_obj'], args_mgdc['D_long'], args_mgdc.get('D_out_affine', 6)
-        )
-        self.bev_motion_predictor = BEVMotionPredictor(
-            args_mgdc['D_short'], args_mgdc['D_long'], self.bev_h, self.bev_w
+        B = len(record_len)
+        batch_history_bev_list = self.regroup(history_bev_list, record_len)
+        bev_final = []
+        for b in range(B):
+            N = record_len[b]
+            history_bev = batch_history_bev_list[b]
+            if history_bev.dim() == 3:
+                stacked_history = torch.stack(history_bev, dim=1).unsqueeze(0) #[1,C,numframes,H,W]
+            elif history_bev[0].dim() == 4:
+                stacked_history = torch.cat(history_bev, dim=0).unsqueeze(0).permute(0,2,1,3,4) # [1, C, NumFrames, H,W]
+            else:
+                raise ValueError("Unsupported history tensor dim")
+
+            x = self.relu(self.norm(self.conv3d(stacked_history)))
+            x = self.pool(x)
+            bev_final.append(x)
+        bev_final = torch.cat(bev_final, dim=0)
+        return bev_final
+
+class BEVFlowPredictor(nn.Module):
+    def __int__(self, D_short_ctx, D_long_ctx, D_current_feat,
+                D_hidden, num_flow_channels=2, num_uncertainty_channels=1):
+        super().__init__()
+        input_channels = D_current_feat
+        if D_short_ctx > 0: input_channels += D_short_ctx
+        if D_long_ctx > 0: input_channels += D_long_ctx
+        input_channels += 1 #For delay scalar map
+
+        #U-Net like structure
+        self.encoder1 = BasicConvBlock(input_channels, D_hidden)
+        self.encoder2 = BasicConvBlock(D_hidden, D_hidden * 2, stride=2)
+        self.encoder3 = BasicConvBlock(D_hidden * 2, D_hidden * 4, stride=2)
+
+        self.decoder2 = BasicConvBlock(D_hidden * 4 + D_hidden * 2, D_hidden * 2)  # Skip conn
+        self.upsample2 = nn.ConvTranspose2d(D_hidden * 2, D_hidden * 2, kernel_size=2, stride=2)
+
+        self.decoder1 = BasicConvBlock(D_hidden * 2 + D_hidden, D_hidden)  # Skip conn
+        self.upsample1 = nn.ConvTranspose2d(D_hidden, D_hidden, kernel_size=2, stride=2)
+
+        self.flow_head = nn.Conv2d(D_hidden, num_flow_channels, kernel_size=3, padding=1)
+        self.uncertainty_head = nn.Conv2d(D_hidden, num_uncertainty_channels, kernel_size=3, padding=1)
+
+        nn.init.zeros_(self.flow_head.weight)
+        if self.flow_head.bias is not None: nn.init.zeros_(self.flow_head.bias)
+
+    def forward(self, current_F_cat_t0, short_term_ctx, long_term_ctx, delay_scalar_map):
+        # current_F_cat_t0: [B, C_V+C_F+C_D, H, W]
+        # short_term_ctx: [B, D_short_ctx, H, W] or None
+        # long_term_ctx: [B, D_long_ctx, H, W] or None (can be global vector tiled too)
+        # delay_scalar_map: [B, 1, H, W]
+        input_list = [current_F_cat_t0]
+        if short_term_ctx is not None:
+            # Long-term context can modulate short-term context
+            if long_term_ctx is not None:
+                # Example: FiLM-like modulation or simple concat + conv
+                # For simplicity, concat here
+                # Ensure long_term_ctx is spatially aligned if it's a map
+                # If long_term_ctx is global, tile it.
+                # If both are maps:
+                # combined_short_long = torch.cat([short_term_ctx, long_term_ctx], dim=1)
+                # refined_short_ctx = self.short_long_refiner(combined_short_long) # some conv
+                # input_list.append(refined_short_ctx)
+                input_list.append(short_term_ctx)
+                input_list.append(long_term_ctx)
+            else:
+                input_list.append(short_term_ctx)
+        elif long_term_ctx is not None:# Only long term available
+            input_list.append(long_term_ctx)
+        input_list.append(delay_scalar_map)
+
+        x = torch.cat(input_list, dim=1)
+
+        enc1 = self.encoder1(x)  # D_hidden
+        enc2 = self.encoder2(enc1)  # D_hidden*2
+        enc3 = self.encoder3(enc2)  # D_hidden*4
+
+        dec2 = self.upsample2(enc3)  # D_hidden*2
+        dec2 = torch.cat([dec2, enc2], dim=1)  # Skip
+        dec2 = self.decoder2(dec2)  # D_hidden*2
+
+        dec1 = self.upsample1(dec2)  # D_hidden
+        dec1 = torch.cat([dec1, enc1], dim=1)  # Skip
+        dec1 = self.decoder1(dec1)  # D_hidden
+
+        flow = self.flow_head(dec1)
+        uncertainty = torch.sigmoid(self.uncertainty_head(dec1))
+        return flow, uncertainty
+
+class MultiGranularityBevDelayCompensation(nn.Module):
+    def __init__(self, args_mgdc_bev):
+        super().__init__()
+        self.C_V = args_mgdc_bev['C_V']
+        self.C_F = args_mgdc_bev['C_F']
+        self.C_D = args_mgdc_bev['C_D']
+        self.D_short_ctx_per_gran = args_mgdc_bev['D_short_ctx_per_granularity']
+        self.D_long_ctx_per_gran = args_mgdc_bev['D_long_ctx_per_granularity']
+        self.num_short_history = args_mgdc_bev['num_short_history_frames']
+        self.num_long_history = args_mgdc_bev['num_long_history_frames']
+        # Short-term encoders for each granularity
+        if self.C_V > 0 and self.num_short_history > 0:
+            self.short_encoder_vox = TemporalContextEncoder(self.C_V, self.D_short_ctx_per_gran, self.num_short_history)
+        if self.C_F > 0 and self.num_short_history > 0:
+            self.short_encoder_feat = TemporalContextEncoder(self.C_F, self.D_short_ctx_per_gran,
+                                                             self.num_short_history)
+        if self.C_D > 0 and self.num_short_history > 0:
+            self.short_encoder_det = TemporalContextEncoder(self.C_D, self.D_short_ctx_per_gran, self.num_short_history)
+
+        # Long-term encoders for each granularity
+        if self.C_V > 0 and self.num_long_history > 0:
+            self.long_encoder_vox = TemporalContextEncoder(self.C_V, self.D_long_ctx_per_gran,
+                                                           self.num_long_history)
+        if self.C_F > 0 and self.num_long_history > 0:
+            self.long_encoder_feat = TemporalContextEncoder(self.C_F, self.D_long_ctx_per_gran,
+                                                            self.num_long_history)
+        if self.C_D > 0 and self.num_long_history > 0:
+            self.long_encoder_det = TemporalContextEncoder(self.C_D, self.D_long_ctx_per_gran,
+                                                           self.num_long_history)
+
+        # Combine context from all granularities
+        total_short_ctx_dim = 0
+        if self.C_V > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
+        if self.C_F > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
+        if self.C_D > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
+
+        total_long_ctx_dim = 0
+        if self.C_V > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
+        if self.C_F > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
+        if self.C_D > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
+
+        self.flow_predictor = BEVFlowPredictor(
+            total_short_ctx_dim,
+            total_long_ctx_dim,
+            self.C_V + self.C_F + self.C_D,  # Channels of current concatenated F_t0
+            args_mgdc_bev['flow_predictor_hidden_dim']
         )
         self.feature_warper = FeatureWarper()
 
-        # Store which historical frames are recent/distant for T_out splitting
-        self.ks = args_mgdc['num_recent_frames_ks']
-        self.kl = args_mgdc['num_distant_frames_kl']
-        self.n_skip = args_mgdc['distant_frame_skip_n']
-
-    def _prepare_history_with_time_info(self, historical_X_j_list_raw):
-        # historical_X_j_list_raw: list of X_j^k, ordered from most recent to oldest
-        # We need to select K_S recent and K_L distant and assign time/type indices
-
-        # This logic needs to be robust, e.g., if len(historical_X_j_list_raw) is small
-        prepared_history = []
-
-        # Recent frames
-        time_embed_idx_counter = 0
-        for i in range(min(self.ks, len(historical_X_j_list_raw))):
-            prepared_history.append((historical_X_j_list_raw[i], time_embed_idx_counter, 0))  # 0 for recent
-            time_embed_idx_counter += 1
-
-        # Distant frames
-        # Start looking for distant frames after the K_S recent ones
-        # And skip N_skip frames
-        distant_collected = 0
-        current_raw_idx = self.ks
-        while distant_collected < self.kl and current_raw_idx < len(historical_X_j_list_raw):
-            prepared_history.append(
-                (historical_X_j_list_raw[current_raw_idx], time_embed_idx_counter, 1))  # 1 for distant
-            time_embed_idx_counter += 1
-            distant_collected += 1
-            current_raw_idx += (self.n_skip + 1)  # Skip n_skip frames
-
-        return prepared_history
-
-    def _split_transformer_output(self, t_out_flat, historical_X_j_list_with_time_info, num_patches_per_frame):
-        # t_out_flat: [1, TotalPatches, E]
-        # num_patches_per_frame: H_prime * W_prime
-        # This function needs to return t_out_recent_tokens and t_out_distant_tokens
-        # based on the seq_type in historical_X_j_list_with_time_info
-
-        t_out_recent_tokens_list = []
-        t_out_distant_tokens_list = []
-        t_out_t0_tokens = None  # Tokens corresponding to X_j^t0 (most recent in history)
-
-        current_token_idx = 0
-        for x_bev_k, time_idx_k, seq_type_k in historical_X_j_list_with_time_info:
-            # Assuming each frame contributes num_patches_per_frame consistently for simplicity
-            # (In reality, MixedHistoryTokenizer might truncate, making this complex)
-            frame_tokens = t_out_flat[:, current_token_idx: current_token_idx + num_patches_per_frame, :]
-
-            if seq_type_k == 0:  # Recent
-                t_out_recent_tokens_list.append(frame_tokens)
-                if time_idx_k == 0:  # Assuming the very first recent frame is t0
-                    t_out_t0_tokens = frame_tokens
-            else:  # Distant
-                t_out_distant_tokens_list.append(frame_tokens)
-            current_token_idx += num_patches_per_frame
-
-        # Concatenate all recent/distant tokens respectively
-        # Handle cases where lists might be empty
-        t_out_recent = torch.cat(t_out_recent_tokens_list, dim=1) if t_out_recent_tokens_list else \
-            torch.empty(1, 0, self.embed_dim, device=t_out_flat.device)
-        t_out_distant = torch.cat(t_out_distant_tokens_list, dim=1) if t_out_distant_tokens_list else \
-            torch.empty(1, 0, self.embed_dim, device=t_out_flat.device)
-
-        if t_out_t0_tokens is None and t_out_recent_tokens_list:  # Fallback if t0 not explicitly first
-            t_out_t0_tokens = t_out_recent_tokens_list[0]
-        elif t_out_t0_tokens is None:  # No recent tokens at all
-            t_out_t0_tokens = torch.empty(1, 0, self.embed_dim, device=t_out_flat.device)
-
-        return t_out_recent, t_out_distant, t_out_t0_tokens
-
     def forward(self,
-                historical_X_j_list_raw,  # List of [1, C_total_hist, H, W] for agent j, from t0-dt, t0-2dt ...
-                current_F_vox_trans_t0,  # Sparse BEV map [1, C_V, H, W] or None
-                current_F_feat_trans_t0,  # Sparse BEV map [1, C_F, H, W] or None
-                current_f_det_list_trans_t0,  # List of object dicts at t0 or None
-                delay_time_span_scalar):  # Scalar (t-t0)
+                current_F_vox_t0, current_F_feat_t0, current_F_det_bev_t0,  # [B,C,H,W] or None
+                short_history_vox, short_history_feat, short_history_det,  # list of [B,C,H,W]
+                long_history_vox, long_history_feat, long_history_det,  # list of [B,C,H,W]
+                delay_time_span_scalar
+                ):
 
-        if not historical_X_j_list_raw:  # No history, cannot perform this type of compensation
-            # Fallback: maybe return uncompensated data or apply a simpler compensation
-            # For now, return as is if no history.
-            print("Warning: MGDC called with no history. Returning uncompensated data.")
-            return current_f_det_list_trans_t0, current_F_vox_trans_t0, current_F_feat_trans_t0
+        b, _, h, w = current_F_vox_t0.shape if current_F_vox_t0 is not None else \
+                    current_F_feat_t0.shape if current_F_feat_t0 is not None else \
+                    current_F_det_bev_t0.shape
 
-        # 1. Prepare history with time/type info and tokenize
-        history_with_info = self._prepare_history_with_time_info(historical_X_j_list_raw)
-        if not history_with_info:  # Still no usable history
-            print("Warning: MGDC could not prepare history. Returning uncompensated data.")
-            return current_f_det_list_trans_t0, current_F_vox_trans_t0, current_F_feat_trans_t0
+        if self.C_V > 0 and self.num_short_history > 0 and short_history_vox:
+            s_ctx_vox = self.short_encoder_vox(short_history_vox)
+        if self.C_F > 0 and self.num_short_history > 0 and short_history_feat:
+            s_ctx_feat = self.short_encoder_feat(short_history_feat)
+        if self.C_D > 0 and self.num_short_history > 0 and short_history_det:
+            s_ctx_det = self.short_encoder_det(short_history_det)
 
-        t_in_flat, _ = self.tokenizer(history_with_info)  # [1, TotalPatches, E]
-        if t_in_flat.shape[1] == 0:  # Tokenizer produced no tokens
-            print("Warning: MGDC tokenizer produced no tokens. Returning uncompensated data.")
-            return current_f_det_list_trans_t0, current_F_vox_trans_t0, current_F_feat_trans_t0
+        short_term_contexts = [c for c in [s_ctx_vox, s_ctx_feat, s_ctx_det] if c is not None]
+        if short_term_contexts:
+            full_short_ctx = torch.cat(short_term_contexts, dim=1)
+        else:  # No short history processed
+            full_short_ctx = None  # Or zeros: torch.zeros(b, 0, h, w, device=...)
 
-        # 2. Transformer Encoding
-        t_out_flat = self.transformer_encoder(t_in_flat)  # [1, TotalPatches, E]
+        # Encode long-term history
+        l_ctx_vox, l_ctx_feat, l_ctx_det = None, None, None
+        if self.C_V > 0 and self.num_long_history > 0 and long_history_vox:
+            l_ctx_vox = self.long_encoder_vox(long_history_vox)
+        if self.C_F > 0 and self.num_long_history > 0 and long_history_feat:
+            l_ctx_feat = self.long_encoder_feat(long_history_feat)
+        if self.C_D > 0 and self.num_long_history > 0 and long_history_det:
+            l_ctx_det = self.long_encoder_det(long_history_det)
 
-        # 3. Context Feature Extraction
-        # This requires knowing how many patches each frame in history_with_info contributed to t_out_flat
-        num_patches_per_frame = self.h_prime * self.w_prime  # Assuming fixed patches per frame
+        long_term_contexts = [c for c in [l_ctx_vox, l_ctx_feat, l_ctx_det] if c is not None]
+        if long_term_contexts:
+            full_long_ctx = torch.cat(long_term_contexts, dim=1)
+        else:  # No long history processed
+            full_long_ctx = None  # Or zeros
 
-        t_out_recent_tokens, t_out_distant_tokens, t_out_t0_tokens_for_obj_ctx = \
-            self._split_transformer_output(t_out_flat, history_with_info, num_patches_per_frame)
+            # Prepare current features and delay map
+            current_F_parts = []
+            if current_F_vox_t0 is not None:
+                current_F_parts.append(current_F_vox_t0)
+            else:
+                current_F_parts.append(torch.zeros(b, self.C_V, h, w,
+                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
+                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))  # Add zeros if None
 
-        # H_short from t0 tokens (or all recent ones, paper says "mainly using t0")
-        # Let's use t0 tokens for H_short for simplicity, assuming t0 is the first in recent.
-        H_short = self.short_term_decoder(
-            t_out_t0_tokens_for_obj_ctx if t_out_t0_tokens_for_obj_ctx.shape[1] > 0 else t_out_recent_tokens)
-        z_long = self.long_term_aggregator(t_out_distant_tokens)  # [1, D_long]
+            if current_F_feat_t0 is not None:
+                current_F_parts.append(current_F_feat_t0)
+            else:
+                current_F_parts.append(torch.zeros(b, self.C_F, h, w,
+                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
+                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
 
-        # 4. Motion Prediction & Compensation
+            if current_F_det_bev_t0 is not None:
+                current_F_parts.append(current_F_det_bev_t0)
+            else:
+                current_F_parts.append(torch.zeros(b, self.C_D, h, w,
+                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
+                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
 
-        # --- Object-level ---
-        compensated_f_det_list_t = []
-        if current_f_det_list_trans_t0 is not None:
-            # Convert detection list boxes to RoIs [K, 5] for RoIAlign
-            # This assumes boxes are in pixel coordinates of the BEV map
-            rois_for_obj_ctx = []
-            original_obj_params = []  # To store original box params for transformation
-            for obj_dict in current_f_det_list_trans_t0:
-                # Example: obj_dict = {'box_bev_coords': [x1,y1,x2,y2], 'label':l, 'score':s}
-                # Add batch index 0 for RoIAlign
-                rois_for_obj_ctx.append([0] + obj_dict['box_bev_coords'])
-                original_obj_params.append(obj_dict)  # Store full dict
+            current_F_cat_t0 = torch.cat(current_F_parts, dim=1)
 
-            if rois_for_obj_ctx:
-                rois_tensor = torch.tensor(rois_for_obj_ctx,
-                                           device=t_out_flat.device,
-                                           dtype=torch.float32)
+            delay_map = torch.full((b, 1, h, w), delay_time_span_scalar,
+                                   device=current_F_cat_t0.device, dtype=current_F_cat_t0.dtype)
 
-                # z_obj_o_list: list of [D_obj] tensors
-                z_obj_o_list = self.object_context_extractor(t_out_t0_tokens_for_obj_ctx, [rois_tensor])
+            # Predict flow and uncertainty
+            # The BEVFlowPredictor needs to handle None for full_short_ctx or full_long_ctx
+            # (e.g., by having its input_channels calculation be dynamic or by passing zero tensors)
+            # For now, flow_predictor init assumes fixed D_short_ctx, D_long_ctx.
+            # If full_short_ctx is None, pass zeros of expected shape.
+            if full_short_ctx is None:
+                total_short_ctx_dim = self.flow_predictor.encoder1.conv.in_channels - \
+                                      (self.C_V + self.C_F + self.C_D) - 1 - \
+                                      (full_long_ctx.shape[1] if full_long_ctx is not None else 0)
+                if total_short_ctx_dim > 0:
+                    full_short_ctx = torch.zeros(b, total_short_ctx_dim, h, w, device=current_F_cat_t0.device)
+                else:  # This case implies D_short_ctx was 0
+                    full_short_ctx = None
 
-                for i, z_obj_o in enumerate(z_obj_o_list):
-                    T_obj_o_params = self.object_motion_predictor(
-                        z_obj_o, z_long.squeeze(0), delay_time_span_scalar
-                    )  # T_obj_o_params: [D_out_affine]
+            if full_long_ctx is None:
+                total_long_ctx_dim = self.flow_predictor.encoder1.conv.in_channels - \
+                                     (self.C_V + self.C_F + self.C_D) - 1 - \
+                                     (full_short_ctx.shape[1] if full_short_ctx is not None else 0)
+                if total_long_ctx_dim > 0:
+                    full_long_ctx = torch.zeros(b, total_long_ctx_dim, h, w, device=current_F_cat_t0.device)
+                else:
+                    full_long_ctx = None
 
-                    # Apply T_obj_o_params to original_obj_params[i]['box_bev_coords']
-                    # This is a placeholder for actual transformation logic
-                    # E.g., if D_out_affine is (dx, dy, d_theta) for 2D box center and orientation
-                    compensated_box_params = self._apply_affine_to_box(original_obj_params[i], T_obj_o_params)
-                    compensated_f_det_list_t.append(compensated_box_params)  # Store updated dict
-            else:  # No objects in the list
-                compensated_f_det_list_t = None
+            flow_field, uncertainty_map = self.flow_predictor(
+                current_F_cat_t0, full_short_ctx, full_long_ctx, delay_map
+            )
 
-        # --- BEV-level ---
-        O_bev, U_bev = self.bev_motion_predictor(H_short, z_long, delay_time_span_scalar)
-        # O_bev: [1, 2, H, W], U_bev: [1, 1, H, W]
+            # Warp features
+            compensated_F_vox_t, compensated_F_feat_t, compensated_F_det_bev_t = None, None, None
+            if current_F_vox_t0 is not None:
+                compensated_F_vox_t = self.feature_warper.flow_warp(current_F_vox_t0, flow_field,
+                                                                    delay_time_span_scalar)
+                compensated_F_vox_t = compensated_F_vox_t * (1 - uncertainty_map)
+            if current_F_feat_t0 is not None:
+                compensated_F_feat_t = self.feature_warper.flow_warp(current_F_feat_t0, flow_field,
+                                                                     delay_time_span_scalar)
+                compensated_F_feat_t = compensated_F_feat_t * (1 - uncertainty_map)
+            if current_F_det_bev_t0 is not None:
+                compensated_F_det_bev_t = self.feature_warper.flow_warp(current_F_det_bev_t0, flow_field,
+                                                                        delay_time_span_scalar)
+                compensated_F_det_bev_t = compensated_F_det_bev_t * (1 - uncertainty_map)
 
-        hat_F_vox_t = None
-        if current_F_vox_trans_t0 is not None:
-            # Warper expects flow that directly maps src to dest coords, or displacement
-            # Our O_bev is displacement. scaled_delay is already incorporated in predictor.
-            # Paper: f_warp(F, (t-t0)*O_bev). So O_bev is flow_per_unit_delay.
-            Z_vox_t = self.feature_warper.flow_warp(current_F_vox_trans_t0, O_bev, delay_time_span_scalar)
-            hat_F_vox_t = Z_vox_t * (1 - U_bev)
+            # Note: Spatial transformation to ego frame is not explicitly done here.
+            # It's assumed that the flow_field implicitly learns to predict motion
+            # such that when warped, features are pseudo-aligned to where they *would be*
+            # in the ego's view at current time, if they were still in collab's coord system.
+            # A final explicit spatial transform using pairwise_t_matrix might still be needed
+            # AFTER this compensation, before fusion with ego.
+            # Or, the `delay_time_span_scalar` and history implicitly guide the flow predictor
+            # to output flow in a "common" or "ego-aligned" sense if training data supports it.
+            # This is a subtle but important point. Usually, flow is in pixel space of the input.
 
-        hat_F_feat_t = None
-        if current_F_feat_trans_t0 is not None:
-            Z_feat_t = self.feature_warper.flow_warp(current_F_feat_trans_t0, O_bev, delay_time_span_scalar)
-            hat_F_feat_t = Z_feat_t * (1 - U_bev)
+            return compensated_F_vox_t, compensated_F_feat_t, compensated_F_det_bev_t, uncertainty_map
 
-        return compensated_f_det_list_t, hat_F_vox_t, hat_F_feat_t
 
-    def _apply_affine_to_box(self, original_obj_dict, affine_params_tensor):
-        # Placeholder: Implement actual transformation of bounding box
-        # based on the format of affine_params_tensor (e.g., dx, dy, dtheta)
-        # For example:
-        # box_center_x, box_center_y, w, l, heading = original_obj_dict['params']
-        # dx, dy, d_heading = affine_params_tensor[0], affine_params_tensor[1], affine_params_tensor[2]
-        # new_center_x = box_center_x + dx
-        # new_center_y = box_center_y + dy
-        # new_heading = heading + d_heading
-        # return {'box_bev_coords': updated_coords, 'label': original_obj_dict['label'], ...}
 
-        # Simple copy for now, assuming affine_params are deltas for the dict's values
-        compensated_dict = original_obj_dict.copy()
-        # Update compensated_dict['box_bev_coords'] or other relevant fields
-        # This is highly dependent on your box representation and affine_params meaning
-        # Example: if affine_params is [dx_center, dy_center, d_angle]
-        # And box_bev_coords is [x1,y1,x2,y2], you'd need to convert to center, apply, convert back.
-        # Or if box is [cx, cy, w, l, angle]
-
-        # This is a very rough placeholder
-        if 'box_bev_coords' in compensated_dict and len(
-                affine_params_tensor) >= 2:  # Assume dx, dy for top-left for now
-            compensated_dict['box_bev_coords'][0] += affine_params_tensor[0].item()
-            compensated_dict['box_bev_coords'][1] += affine_params_tensor[1].item()
-            compensated_dict['box_bev_coords'][2] += affine_params_tensor[
-                0].item()  # Assuming same delta for bottom-right
-            compensated_dict['box_bev_coords'][3] += affine_params_tensor[1].item()
-
-        return compensated_dict

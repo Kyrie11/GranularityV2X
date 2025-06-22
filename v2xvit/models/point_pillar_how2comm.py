@@ -136,9 +136,11 @@ class PointPillarHow2comm(nn.Module):
             spatial_features = batch_dict['spatial_features']
             feature_list.append(spatial_features)
             feature_2d_list.append(spatial_features_2d)
+            print("feature_2d_list.len=",len(feature_2d_list))
             matrix_list.append(pairwise_t_matrix)
             regroup_feature_list.append(self.regroup(
                 spatial_features_2d, record_len))
+            print("regroup_feature_list.len=",len(regroup_feature_list))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
 
@@ -158,16 +160,16 @@ class PointPillarHow2comm(nn.Module):
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
-        history_feature = transform_feature(regroup_feature_list_large, self.delay)
+
         short_history_feature = regroup_feature_list_large[-1:-4:-1]
         long_history_feature = regroup_feature_list_large[len(regroup_feature_list)-1::-4]
-        print('len(short_history_feature)=', len(short_history_feature))
-        print('len(long_history_feature)=', len(long_history_feature))
-        print("len(regroup_feature_list_large)=",len(regroup_feature_list_large))
-        history_vox = transform_feature(regroup_vox_list, self.delay)
+
         short_history_vox = regroup_vox_list[-1:-4:-1]
-        history_det = transform_feature(regroup_det_list, self.delay)
+        long_history_vox = regroup_vox_list[len(regroup_feature_list)-1::-4]
+
         short_history_det = regroup_det_list[-1:-4:-1]
+        long_history_det = regroup_det_list[len(regroup_feature_list)-1::-4]
+
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
@@ -183,7 +185,9 @@ class PointPillarHow2comm(nn.Module):
         # det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
         det_bev = torch.cat([psm_single, rm_single], dim=1)
         fused_bev = [vox_bev, spatial_features, det_bev]
-        fused_his = [history_vox, history_feature, history_det]
+
+        fused_long_his = [long_history_vox, long_history_feature, long_history_det]
+        fused_short_his = [short_history_vox, short_history_feature, short_history_det]
 
 
         if self.delay == 0:
@@ -193,7 +197,7 @@ class PointPillarHow2comm(nn.Module):
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
                 fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head], history=fused_his)
+                [self.shrink_conv, self.cls_head, self.reg_head], short_history=fused_short_his, long_history=fused_long_his)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
