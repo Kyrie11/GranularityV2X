@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.ops import RoIAlign  # For ObjectContextExtractor
 
 
 # Assuming BasicConvBlock and other utilities are defined elsewhere or standard
