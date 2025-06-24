@@ -195,7 +195,7 @@ class How2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, compensated_bev=None,short_history=None, long_history=None):
+    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, short_history=None, long_history=None, delay=0):
         vox_bev, x, det_bev = bev_list
         _, _, H, W = x.shape
 
@@ -212,7 +212,7 @@ class How2comm(nn.Module):
 
         if short_history and long_history:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t, _ = self.mgdc_bev_compensator(compensated_bev,short_history, long_history, record_len)
+            comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t = self.mgdc_bev_compensator(short_history, long_history,delay)
             x = torch.cat([comp_F_vox_t, comp_F_feat_t, comp_F_det_bev_t] ,dim=1)
         else:
             offset_loss = torch.zeros(1).to(x.device)

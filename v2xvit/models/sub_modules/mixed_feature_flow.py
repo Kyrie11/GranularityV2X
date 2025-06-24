@@ -13,84 +13,14 @@ class BasicConvBlock(nn.Module):
     def forward(self, x):
         return self.relu(self.bn(self.conv(x)))
 
-class TemporalContextEncoder(nn.Module):
-    """Encodes a sequence of BEV features (single granularity)"""
-    def __init__(self, C_in_granularity, D_out_context, num_history_frames):
-        super().__init__()
-        if num_history_frames>0:
-            self.conv3d = nn.Conv3d(C_in_granularity, D_out_context,
-                                    kernel_size=(min(num_history_frames, 3),3,3),# Kernel depth <= num_frames
-                                    padding=(min(num_history_frames, 3)//2 if min(num_history_frames, 3)>1 else 0,1,1))
-            self.norm = nn.BatchNorm3d(D_out_context)
-            self.relu = nn.ReLU()
-            self.pool = nn.AdaptiveAvgPool3d((1,None,None)) #Pool along time dim
-        else: #No history
-            self.dummy_param = nn.Parameter(torch.empty(0))
-
-    def regroup(self, x, record_len):
-        cum_sum_len = torch.cumsum(record_len, dim=0)
-        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
-        return split_x
-
-    def forward(self, history_bev_list):
-        #输入: history_sequence_for_batch, list of Tensors, each [N_agents, C, H, W]
-        try:
-            stacked_his = torch.stack(history_bev_list,dim=2) # [N_agents, C, num_frames, H,W]
-        except Exception as e:
-            raise e
-
-        x = self.relu(self.norm(self.conv3d(stacked_his)))
-        context_feat_map = self.pool(x).squeeze(2)
-
-        return context_feat_map
-
-
-class ShortTermMotionEncoder(nn.Module):
-    def __init__(self, C_total_hist, D_short_out, num_short_frames=3, method='conv_cat'):
-        super().__init__()
-        self.method = method
-        self.num_short_frames = num_short_frames
-        if method=="conv_cat":
-            self.conv_layers = nn.Sequential(
-                BasicConvBlock((num_short_frames+1) * C_total_hist, D_short_out * 2),
-                BasicConvBlock(D_short_out*2, D_short_out)
-            )
-        elif method=="conv3d":
-            self.conv3d_encoder = TemporalContextEncoder(C_total_hist, D_short_out, num_short_frames+1) #+1 for current frame
-
-    def forward(self, short_history, compensated_bev):
-        if self.method == 'conv_cat':
-            padded_history = self._pad_history(short_history, self.num_short_frames)
-            inputs = [compensated_bev] + padded_history
-            inputs = torch.cat(inputs, dim=1)
-            short_ctx = self.conv_layers(inputs)
-        elif self.method=='conv3d':
-            inputs = short_history + [compensated_bev]
-            short_ctx = self.conv3d_encoder(inputs)
-        return short_ctx
-
-class LongTermTrendEncoder(nn.Module):
-    def __init__(self, C_total_hist, D_long_out, num_long_frames, output_type='map'):
-        super().__init__()
-        self.output_type = output_type
-        self.conv3d_encoder = TemporalContextEncoder(C_total_hist, D_long_out, num_long_frames)
-        if output_type=="vector":
-            self.global_pool = nn.AdaptiveAvgPool2d(1) #To make it a vector from map
-
-    def forward(self, long_history):
-        long_context_map = self.conv3d_encoder(long_history)
-        if self.output_type=="vector":
-            long_context_map = self.global_pool(long_context_map).squeeze(-1).squeeze(-1)
-        return long_context_map
-
 
 class BEVFlowPredictor(nn.Module):
-    def __init__(self, D_input_combined, D_hidden):
+    def __init__(self, D_in, D_hidden):
         super().__init__()
         # D_current_feat: Channels of the concatenated F_vox_t0, F_feat_t0, F_det_t0
 
         # U-Net like structure
-        self.encoder1 = BasicConvBlock(D_input_combined, D_hidden)
+        self.encoder1 = BasicConvBlock(D_in, D_hidden)
         self.encoder2 = BasicConvBlock(D_hidden, D_hidden * 2, stride=2)
         self.encoder3 = BasicConvBlock(D_hidden * 2, D_hidden * 4, stride=2)
 
@@ -127,18 +57,13 @@ class BEVFlowPredictor(nn.Module):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
-    def forward(self, compensated_bev, short_term_ctx_batch, long_term_ctx_batch, delay_scalar_map):
+    def forward(self, input):
         # current_F_cat_t0: [B, C_V+C_F+C_D, H, W]
         # short_term_ctx: [B, D_short_ctx, H, W] or None
         # long_term_ctx: [B, D_long_ctx, H, W] or None (can be global vector tiled too)
         # delay_scalar_map: [B, 1, H, W]
-        input_list = []
-        input_list.append(compensated_bev)
-        input_list.append(short_term_ctx_batch)
-        input_list.append(long_term_ctx_batch)
-        input_list.append(delay_scalar_map)
 
-        x = torch.cat(input_list, dim=1)
+        x = torch.cat(input, dim=1)
         enc1 = self.encoder1(x)  # D_hidden
         enc2 = self.encoder2(enc1)  # D_hidden*2
         enc3 = self.encoder3(enc2)  # D_hidden*4
@@ -160,47 +85,89 @@ class BEVFlowPredictor(nn.Module):
         return object_flow, residual_flow, uncertainty_map
 
 
+class ConvGRUCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size):
+        super(ConvGRUCell, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        padding = kernel_size // 2
+
+        self.conv_gates = nn.Conv2d(self.input_dim + self.hidden_dim, 2 * self.hidden_dim, kernel_size, padding=padding)
+        self.conv_can = nn.Conv2d(self.input_dim + self.hidden_dim, self.hidden_dim, kernel_size, padding=padding)
+
+    def forward(self, input_tensor, h_cur):
+        # input_tensor: [B, C_in, H, W]
+        # h_cur: [B, C_hidden, H, W]
+        combined = torch.cat([input_tensor, h_cur], dim=1)
+
+        gates = self.conv_gates(combined)
+        reset_gate, update_gate = torch.sigmoid(gates).chunk(2, dim=1)
+
+        combined_reset = torch.cat([input_tensor, reset_gate * h_cur], dim=1)
+        cc_can = torch.tanh(self.conv_can(combined_reset))
+
+        h_next = (1 - update_gate) * h_cur + update_gate * cc_can
+        return h_next
+
+
 class HierarchicalMotionPredictor(nn.Module):
-    def __init__(self, C_total_bev, C_total_hist, D_short_ctx, D_long_ctx_map, D_long_ctx_vec,
-                 num_short_frames, num_long_frames, flow_predictor_hidden_dim, long_ctx_type="map"):
-        super().__init__()
-        self.delay_embedding = nn.Embedding(delay_steps+1, delay_embedding_dim)
-        self.short_term_encoder = ShortTermMotionEncoder(C_total_hist, D_short_ctx, num_short_frames, method="conv3d")
-        self.long_ctx_type = long_ctx_type
-        D_long_encoder_out = D_long_ctx_map if long_ctx_type == 'map' else D_long_ctx_vec
-        self.long_term_encoder = LongTermTrendEncoder(C_total_hist, D_long_encoder_out, num_long_frames, output_type=long_ctx_type)
+    def __init__(self, args_mgdc_bev):
+        super(HierarchicalMotionPredictor, self).__init__()
+        self.c_vox = args_mgdc_bev.get('c_vox', 10)
+        self.c_feat = args_mgdc_bev.get('c_feat', 64)
+        self.c_det = args_mgdc_bev.get('c_det', 16)
+        self.D_hidden = args_mgdc_bev.get('D_hidden', 128)
 
-        if long_ctx_type == "vector":
-            self.z_long_map_proj_channels = 32
-            self.z_long_mlp = nn.Linear(D_long_ctx_vec, self.z_long_map_proj_channels)
-        else:
-            self.z_long_map_proj_channels = D_long_ctx_map
+        self.delay_steps = args_mgdc_bev.get('delay_steps', 3)
+        self.delay_embedding_dim = args_mgdc_bev.get('delay_embedding_dim', 32)
 
-        current_feat_dim_for_flow_pred = C_total_bev
-
-        D_input_combined = C_total_bev + D_short_ctx + self.z_long_map_proj_channels + delay_embedding_dim
-        self.flow_predictor = BEVFlowPredictor(
-            D_input_combined,
-            flow_predictor_hidden_dim
+        self.feature_encoder = nn.Sequential(
+            nn.Conv2d(self.c_vox + self.c_feat + self.c_det, self.D_hidden, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
         )
 
-    def forward(self, compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay_step):
+        # NEW: 定义ConvGRU单元用于融合时序信息
+        # short_term和long_term将使用同一个GRU，但以不同的隐藏状态输入
+        self.temporal_fusion_gru = ConvGRUCell(self.D_hidden, self.D_hidden, kernel_size=3)
+
+        # NEW: 定义时间嵌入层
+        self.delay_embedding = nn.Embedding(self.delay_steps, self.delay_embedding_dim)
+
+        self.flow_predictor = BEVFlowPredictor(
+            D_in=self.D_hidden + self.delay_embedding_dim,
+            D_hidden=self.D_hidden
+        )
+
+    def forward(self, compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay):
         #len(short_history_list)=帧数
         #len(short_history_list[0])=batch_size
         B,_,H,W = short_his_cat_tensors[0].shape
-        delay_idx_tensor = torch.full((B, 1), float(delay_step), device=compensated_bev.device, dtype=torch.long)
-        delay_embedded_vec = self.delay_embedding(delay_idx_tensor.squeeze(1))
-        delay_map = delay_embedded_vec.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, W)
-        h_short_ctx = self.short_term_encoder(short_his_cat_tensors, compensated_bev)
-        h_long_ctx = self.long_term_encoder(long_his_cat_tensors)
-        if self.long_ctx_type == "vector":
-            z_long_projected = self.z_long_mlp(h_long_ctx)
-            h_long_ctx_flow = z_long_projected.unsqueeze(-1).unsqueeze(-1).expand(B,-1,H,W)
-        else:
-            h_long_ctx_flow = h_long_ctx
 
-        object_flow_batch, residual_flow_batch, uncertainty_map_batch = self.flow_predictor(compensated_bev, h_short_ctx, h_long_ctx_flow, delay_map)
-        return object_flow_batch, residual_flow_batch, uncertainty_map_batch
+        # NEW: 初始化GRU的隐藏状态
+        h_short = torch.zeros(B, self.temporal_fusion_gru.hidden_dim, H, W, device=short_his_cat_tensors[0].device)
+        h_long = torch.zeros(B, self.temporal_fusion_gru.hidden_dim, H, W, device=short_his_cat_tensors[0].device)
+
+        # NEW: 按时间顺序（从最远到最近）迭代处理历史帧
+        # 处理长期历史
+        for his_frame in long_his_cat_tensors:
+            encoded_frame = self.feature_encoder(his_frame)
+            h_long = self.temporal_fusion_gru(encoded_frame, h_long)
+
+        # 注意：这里我们用h_long的最终状态作为h_short的初始状态，实现长短期信息的传递
+        h_short = h_long
+        for his_frame in short_his_cat_tensors:
+            encoded_frame = self.feature_encoder(his_frame)
+            h_short = self.temporal_fusion_gru(encoded_frame, h_short)
+
+        delay = delay.long()
+        delay_emb_vec = self.delay_embedding(delay)
+        # 扩展成空间特征图
+        delay_map = delay_emb_vec.view(B, self.delay_embedding_dim, 1, 1).expand(B, self.delay_embedding_dim, H, W)
+
+        final_predictor_input = torch.cat([h_short, delay_map], dim=1)
+
+        return self.flow_predictor(final_predictor_input)
+
 
 class FeatureWarper(nn.Module):
     def get_grid(self, B, H, W, device):
@@ -235,23 +202,12 @@ class FeatureWarper(nn.Module):
 
 class MultiGranularityBevDelayCompensation(nn.Module):
     def __init__(self, args_mgdc_bev):
-        super().__init__()
-        self.C_V = args_mgdc_bev['C_V']
-        self.C_F = args_mgdc_bev['C_F']
-        self.C_D = args_mgdc_bev['C_D']
-        self.C_total_hist = self.C_V + self.C_F + self.C_D
+        super(MultiGranularityBevDelayCompensation, self).__init__()
+        self.c_vox = args_mgdc_bev.get('c_vox', 10)
+        self.c_feat = args_mgdc_bev.get('c_feat', 64)
+        self.c_det = args_mgdc_bev.get('c_det', 16)
 
-        self.motion_predictor = HierarchicalMotionPredictor(
-            C_total_bev = self.C_V + self.C_F + self.C_D,
-            C_total_hist=self.C_total_hist,  # For history items
-            D_short_ctx=args_mgdc_bev['D_short_ctx'],
-            D_long_ctx_map=args_mgdc_bev['D_long_ctx_map'],  # if long_ctx_type='map'
-            D_long_ctx_vec=args_mgdc_bev['D_long_ctx_vec'],  # if long_ctx_type='vector'
-            num_short_frames=args_mgdc_bev['num_short_history_frames'],
-            num_long_frames=args_mgdc_bev['num_long_history_frames'],
-            flow_predictor_hidden_dim=args_mgdc_bev['flow_predictor_hidden_dim'],
-            long_ctx_type=args_mgdc_bev.get('long_ctx_type', 'map')
-        )
+        self.motion_predictor = HierarchicalMotionPredictor(args_mgdc_bev)
 
         self.feature_warper = FeatureWarper()
 
@@ -275,7 +231,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
             output_tensor_list.append(batched_tensor_at_t)
         return output_tensor_list
 
-    def forward(self, compensated_bev, short_his_list, long_his_list, delay_steps):
+    def forward(self, short_his_list, long_his_list, delay_steps):
         # len(record_len) = batch_size(B)
         # record_len[i]=cav_num_i
         #current_F_fused = [vox_bev, feat_bev, det_bev]
@@ -296,6 +252,8 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         short_his_fea_tensors = self._prepare_history_tensor_list(short_his_list[1])
         short_his_det_tensors = self._prepare_history_tensor_list(short_his_list[2])
 
+        B,_,H,W = short_his_vox_tensors[0].shape
+
         long_his_vox_tensors = self._prepare_history_tensor_list(long_his_list[0])
         long_his_fea_tensors = self._prepare_history_tensor_list(long_his_list[1])
         long_his_det_tensors = self._prepare_history_tensor_list(long_his_list[2])
@@ -307,14 +265,15 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         short_his_cat_tensors = [torch.cat([short_his_vox_tensors[i], short_his_fea_tensors[i], short_his_det_tensors[i]], dim=1) for i in range(num_short_frames)]
         long_his_cat_tensors = [torch.cat([long_his_vox_tensors[i], long_his_fea_tensors[i], long_his_det_tensors[i]], dim=1) for i in range(num_long_frames)]
 
+        delay_tensor = torch.full((B,), delay_steps, dtype=torch.long, device=short_his_vox_tensors[0].device)
         #进行运动预测
-        object_flow, residual_flow, uncertainty= self.motion_predictor(compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay_steps)
+        object_flow, residual_flow, uncertainty= self.motion_predictor(short_his_cat_tensors, long_his_cat_tensors, delay_tensor)
 
         final_flow = object_flow + residual_flow
 
-        predicted_F_vox = self.feature_warper.flow_warp(compensated_bev[:,0:self.C_V,:,:], final_flow, delay_steps)
-        predicted_F_fea = self.feature_warper.flow_warp(compensated_bev[:,self.C_V:self.C_V+self.C_F,:,:], final_flow, delay_steps)
-        predicted_F_det = self.feature_warper.flow_warp(compensated_bev[:,self.C_V+self.C_F:,:,:], final_flow, delay_steps)
+        predicted_F_vox = self.feature_warper.flow_warp(compensated_bev[:,0:self.c_vox,:,:], final_flow, delay_steps)
+        predicted_F_fea = self.feature_warper.flow_warp(compensated_bev[:,self.c_vox:self.c_vox+self.c_feat,:,:], final_flow, delay_steps)
+        predicted_F_det = self.feature_warper.flow_warp(compensated_bev[:,self.c_vox+self.c_feat:,:,:], final_flow, delay_steps)
 
         return predicted_F_vox,predicted_F_fea,predicted_F_det
 

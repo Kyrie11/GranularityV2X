@@ -175,16 +175,16 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
 
-        short_history_feature = regroup_feature_list_large[self.delay+1:self.delay+self.num_short_frames+1]
-        long_history_feature = regroup_feature_list_large[self.delay+1::self.long_interval]
+        short_history_feature = regroup_feature_list_large[self.delay:self.delay+self.num_short_frames+1]
+        long_history_feature = regroup_feature_list_large[self.delay::self.long_interval]
 
-        short_history_vox = regroup_vox_list[self.delay+1:self.delay+self.num_short_frames+1]
-        long_history_vox = regroup_vox_list[self.delay+1::self.long_interval]
+        short_history_vox = regroup_vox_list[self.delay:self.delay+self.num_short_frames+1]
+        long_history_vox = regroup_vox_list[self.delay::self.long_interval]
 
-        short_history_det = regroup_det_list[self.delay+1:self.delay+self.num_short_frames+1]
-        long_history_det = regroup_det_list[self.delay+1::self.long_interval]
+        short_history_det = regroup_det_list[self.delay:self.delay+self.num_short_frames+1]
+        long_history_det = regroup_det_list[self.delay::self.long_interval]
 
-        compensated_bev = torch.cat([regroup_feature_list_large[self.delay],regroup_vox_list[self.delay],regroup_det_list[self.delay]], dim=1)
+        # compensated_bev = torch.cat([regroup_feature_list_large[self.delay],regroup_vox_list[self.delay],regroup_det_list[self.delay]], dim=1)
 
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
@@ -209,7 +209,7 @@ class PointPillarHow2comm(nn.Module):
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
                 fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head], compensated=compensated_bev,short_history=fused_short_his, long_history=fused_long_his)
+                [self.shrink_conv, self.cls_head, self.reg_head], short_history=fused_short_his, long_history=fused_long_his,delay=self.delay)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
