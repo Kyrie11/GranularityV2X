@@ -61,6 +61,9 @@ class PointPillarHow2comm(nn.Module):
 
         self.history_max_len = args.get("history_max_len", 10)
 
+        self.num_short_frames = 3
+        self.num_long_frames = 3
+        self.long_interval = 3
 
 
 
@@ -100,6 +103,8 @@ class PointPillarHow2comm(nn.Module):
         feature_list = []
         feature_2d_list = []
         matrix_list = []
+        vox_bev_list = []
+        det_bev_list = []
         regroup_feature_list = []
         regroup_feature_list_large = []
         regroup_vox_list = []
@@ -125,7 +130,7 @@ class PointPillarHow2comm(nn.Module):
             batch_dict = self.backbone(batch_dict)
             # N, C, H', W'
             spatial_features_2d = batch_dict['spatial_features_2d']
-            print("spatial_features_2d.shape=", spatial_features_2d.shape)
+
             # downsample feature to reduce memory
             if self.shrink_flag:
                 spatial_features_2d = self.shrink_conv(spatial_features_2d)
@@ -154,6 +159,7 @@ class PointPillarHow2comm(nn.Module):
             vox_bev = batch_dict['vox_bev']
             #下采样
             vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
+            vox_bev_list.append(vox_bev)
             regroup_vox_list.append(self.regroup(vox_bev, record_len))
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
@@ -161,6 +167,7 @@ class PointPillarHow2comm(nn.Module):
             # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
             # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
             det_bev = torch.cat([psm, rm], dim=1)
+            det_bev_list.append(det_bev)
             regroup_det_list.append(self.regroup(det_bev, record_len))
 
 
@@ -168,29 +175,27 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
 
-        short_history_feature = regroup_feature_list_large[-1:-4:-1]
-        long_history_feature = regroup_feature_list_large[len(regroup_feature_list)-1::-4]
+        short_history_feature = regroup_feature_list_large[self.delay+1:self.delay+self.num_short_frames+1]
+        long_history_feature = regroup_feature_list_large[self.delay+1::self.long_interval]
 
-        short_history_vox = regroup_vox_list[-1:-4:-1]
-        long_history_vox = regroup_vox_list[len(regroup_feature_list)-1::-4]
+        short_history_vox = regroup_vox_list[self.delay+1:self.delay+self.num_short_frames+1]
+        long_history_vox = regroup_vox_list[self.delay+1::self.long_interval]
 
-        short_history_det = regroup_det_list[-1:-4:-1]
-        long_history_det = regroup_det_list[len(regroup_feature_list)-1::-4]
+        short_history_det = regroup_det_list[self.delay+1:self.delay+self.num_short_frames+1]
+        long_history_det = regroup_det_list[self.delay+1::self.long_interval]
+
+        compensated_bev = torch.cat([regroup_feature_list_large[self.delay],regroup_vox_list[self.delay],regroup_det_list[self.delay]], dim=1)
 
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
         psm_single = self.cls_head(spatial_features_2d)
-        rm_single = self.reg_head(spatial_features_2d)
+        # rm_single = self.reg_head(spatial_features_2d)
 
-        # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-        # upsampled_psm= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
-        # upsampled_rm = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
         #得到三个粒度的bev
-        vox_bev = torch.tensor(batch_dict['vox_bev'])
-        # det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
-        det_bev = torch.cat([psm_single, rm_single], dim=1)
+        vox_bev = torch.tensor(vox_bev_list[0])
+        det_bev = det_bev_list[0]
         fused_bev = [vox_bev, spatial_features, det_bev]
 
         fused_long_his = [long_history_vox, long_history_feature, long_history_det]
@@ -204,7 +209,7 @@ class PointPillarHow2comm(nn.Module):
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
                 fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head], short_history=fused_short_his, long_history=fused_long_his)
+                [self.shrink_conv, self.cls_head, self.reg_head], compensated=compensated_bev,short_history=fused_short_his, long_history=fused_long_his)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 

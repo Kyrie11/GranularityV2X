@@ -3,26 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# Assuming BasicConvBlock and other utilities are defined elsewhere or standard
-# from v2xvit.models.sub_modules.your_blocks import BasicConvBlock, ResNetBEVBackbone, ReduceInfTC
-# For now, I'll use placeholders or simplified versions.
-class SEBlock(nn.Module):
-    def __init__(self, channel, reduction=16):
-        super(SEBlock, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channel, channel // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channel // reduction, channel, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y.expand_as(x)
-
 class BasicConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, use_bn=True, use_relu=True):
         super(BasicConvBlock, self).__init__()
@@ -33,18 +13,195 @@ class BasicConvBlock(nn.Module):
     def forward(self, x):
         return self.relu(self.bn(self.conv(x)))
 
-
-# --- Helper: Patch Embedding and Tokenizer ---
-class BEVPatchEmbed(nn.Module):
-    def __init__(self, C_in, embed_dim, patch_size):
+class TemporalContextEncoder(nn.Module):
+    """Encodes a sequence of BEV features (single granularity)"""
+    def __init__(self, C_in_granularity, D_out_context, num_history_frames):
         super().__init__()
-        self.proj = nn.Conv2d(C_in, embed_dim, kernel_size=patch_size, stride=patch_size)
+        if num_history_frames>0:
+            self.conv3d = nn.Conv3d(C_in_granularity, D_out_context,
+                                    kernel_size=(min(num_history_frames, 3),3,3),# Kernel depth <= num_frames
+                                    padding=(min(num_history_frames, 3)//2 if min(num_history_frames, 3)>1 else 0,1,1))
+            self.norm = nn.BatchNorm3d(D_out_context)
+            self.relu = nn.ReLU()
+            self.pool = nn.AdaptiveAvgPool3d((1,None,None)) #Pool along time dim
+        else: #No history
+            self.dummy_param = nn.Parameter(torch.empty(0))
 
-    def forward(self, x):
-        x = self.proj(x)  # [B, E, H', W']
-        return x.flatten(2).transpose(1, 2)  # [B, H'*W', E]
+    def regroup(self, x, record_len):
+        cum_sum_len = torch.cumsum(record_len, dim=0)
+        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
+        return split_x
 
-# --- Feature Warper (from original author, slightly adapted) ---
+    def forward(self, history_bev_list):
+        #输入: history_sequence_for_batch, list of Tensors, each [N_agents, C, H, W]
+        try:
+            stacked_his = torch.stack(history_bev_list,dim=2) # [N_agents, C, num_frames, H,W]
+        except Exception as e:
+            raise e
+
+        x = self.relu(self.norm(self.conv3d(stacked_his)))
+        context_feat_map = self.pool(x).squeeze(2)
+
+        return context_feat_map
+
+
+class ShortTermMotionEncoder(nn.Module):
+    def __init__(self, C_total_hist, D_short_out, num_short_frames=3, method='conv_cat'):
+        super().__init__()
+        self.method = method
+        self.num_short_frames = num_short_frames
+        if method=="conv_cat":
+            self.conv_layers = nn.Sequential(
+                BasicConvBlock((num_short_frames+1) * C_total_hist, D_short_out * 2),
+                BasicConvBlock(D_short_out*2, D_short_out)
+            )
+        elif method=="conv3d":
+            self.conv3d_encoder = TemporalContextEncoder(C_total_hist, D_short_out, num_short_frames+1) #+1 for current frame
+
+    def forward(self, short_history, compensated_bev):
+        if self.method == 'conv_cat':
+            padded_history = self._pad_history(short_history, self.num_short_frames)
+            inputs = [compensated_bev] + padded_history
+            inputs = torch.cat(inputs, dim=1)
+            short_ctx = self.conv_layers(inputs)
+        elif self.method=='conv3d':
+            inputs = short_history + [compensated_bev]
+            short_ctx = self.conv3d_encoder(inputs)
+        return short_ctx
+
+class LongTermTrendEncoder(nn.Module):
+    def __init__(self, C_total_hist, D_long_out, num_long_frames, output_type='map'):
+        super().__init__()
+        self.output_type = output_type
+        self.conv3d_encoder = TemporalContextEncoder(C_total_hist, D_long_out, num_long_frames)
+        if output_type=="vector":
+            self.global_pool = nn.AdaptiveAvgPool2d(1) #To make it a vector from map
+
+    def forward(self, long_history):
+        long_context_map = self.conv3d_encoder(long_history)
+        if self.output_type=="vector":
+            long_context_map = self.global_pool(long_context_map).squeeze(-1).squeeze(-1)
+        return long_context_map
+
+
+class BEVFlowPredictor(nn.Module):
+    def __init__(self, D_input_combined, D_hidden):
+        super().__init__()
+        # D_current_feat: Channels of the concatenated F_vox_t0, F_feat_t0, F_det_t0
+
+        # U-Net like structure
+        self.encoder1 = BasicConvBlock(D_input_combined, D_hidden)
+        self.encoder2 = BasicConvBlock(D_hidden, D_hidden * 2, stride=2)
+        self.encoder3 = BasicConvBlock(D_hidden * 2, D_hidden * 4, stride=2)
+
+        self.decoder2 = BasicConvBlock(D_hidden * 4 + D_hidden * 2, D_hidden * 2)  # Skip conn
+        self.upsample2 = nn.ConvTranspose2d(D_hidden * 2, D_hidden * 2, kernel_size=2, stride=2)
+
+        self.decoder1 = BasicConvBlock(D_hidden * 2 + D_hidden, D_hidden)  # Skip conn
+        self.upsample1 = nn.ConvTranspose2d(D_hidden, D_hidden, kernel_size=2, stride=2)
+
+        # self.flow_head = nn.Conv2d(D_hidden, num_flow_channels, kernel_size=3, padding=1)
+        self.object_flow_head = nn.Sequential(
+            nn.Conv2d(D_hidden, D_hidden // 2, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(D_hidden // 2, 2, kernel_size=1)  # Output 2 channels for (dx, dy)
+        )
+
+        self.residual_flow_head = nn.Sequential(
+            nn.Conv2d(D_hidden, D_hidden // 2, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(D_hidden // 2, 2, kernel_size=1)  # Output 2 channels for (dx, dy)
+        )
+
+        self.uncertainty_head = nn.Sequential(
+            nn.Conv2d(D_hidden, D_hidden // 2, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(D_hidden // 2, 1, kernel_size=1),  # Single channel for uncertainty scalar
+            nn.Sigmoid()
+        )
+
+        for m in [self.object_flow_head, self.residual_flow_head]:
+            for layer in m:
+                if isinstance(layer, nn.Conv2d):
+                    nn.init.zeros_(layer.weight)
+                    if layer.bias is not None:
+                        nn.init.zeros_(layer.bias)
+
+    def forward(self, compensated_bev, short_term_ctx_batch, long_term_ctx_batch, delay_scalar_map):
+        # current_F_cat_t0: [B, C_V+C_F+C_D, H, W]
+        # short_term_ctx: [B, D_short_ctx, H, W] or None
+        # long_term_ctx: [B, D_long_ctx, H, W] or None (can be global vector tiled too)
+        # delay_scalar_map: [B, 1, H, W]
+        input_list = []
+        input_list.append(compensated_bev)
+        input_list.append(short_term_ctx_batch)
+        input_list.append(long_term_ctx_batch)
+        input_list.append(delay_scalar_map)
+
+        x = torch.cat(input_list, dim=1)
+        enc1 = self.encoder1(x)  # D_hidden
+        enc2 = self.encoder2(enc1)  # D_hidden*2
+        enc3 = self.encoder3(enc2)  # D_hidden*4
+
+        dec2 = self.upsample2(enc3)  # D_hidden*2
+        dec2 = torch.cat([dec2, enc2], dim=1)  # Skip
+        dec2 = self.decoder2(dec2)  # D_hidden*2
+
+        dec1 = self.upsample1(dec2)  # D_hidden
+        dec1 = torch.cat([dec1, enc1], dim=1)  # Skip
+        dec1 = self.decoder1(dec1)  # D_hidden
+
+        object_flow = self.object_flow_head(dec1)
+        residual_flow = self.residual_flow_head(dec1)
+        uncertainty_map = self.uncertainty_head(dec1)
+
+
+
+        return object_flow, residual_flow, uncertainty_map
+
+
+class HierarchicalMotionPredictor(nn.Module):
+    def __init__(self, C_total_bev, C_total_hist, D_short_ctx, D_long_ctx_map, D_long_ctx_vec,
+                 num_short_frames, num_long_frames, flow_predictor_hidden_dim, long_ctx_type="map"):
+        super().__init__()
+        self.delay_embedding = nn.Embedding(delay_steps+1, delay_embedding_dim)
+        self.short_term_encoder = ShortTermMotionEncoder(C_total_hist, D_short_ctx, num_short_frames, method="conv3d")
+        self.long_ctx_type = long_ctx_type
+        D_long_encoder_out = D_long_ctx_map if long_ctx_type == 'map' else D_long_ctx_vec
+        self.long_term_encoder = LongTermTrendEncoder(C_total_hist, D_long_encoder_out, num_long_frames, output_type=long_ctx_type)
+
+        if long_ctx_type == "vector":
+            self.z_long_map_proj_channels = 32
+            self.z_long_mlp = nn.Linear(D_long_ctx_vec, self.z_long_map_proj_channels)
+        else:
+            self.z_long_map_proj_channels = D_long_ctx_map
+
+        current_feat_dim_for_flow_pred = C_total_bev
+
+        D_input_combined = C_total_bev + D_short_ctx + self.z_long_map_proj_channels + delay_embedding_dim
+        self.flow_predictor = BEVFlowPredictor(
+            D_input_combined,
+            flow_predictor_hidden_dim
+        )
+
+    def forward(self, compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay_step):
+        #len(short_history_list)=帧数
+        #len(short_history_list[0])=batch_size
+        B,_,H,W = short_his_cat_tensors[0].shape
+        delay_idx_tensor = torch.full((B, 1), float(delay_step), device=compensated_bev.device, dtype=torch.long)
+        delay_embedded_vec = self.delay_embedding(delay_idx_tensor.squeeze(1))
+        delay_map = delay_embedded_vec.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, W)
+        h_short_ctx = self.short_term_encoder(short_his_cat_tensors, compensated_bev)
+        h_long_ctx = self.long_term_encoder(long_his_cat_tensors)
+        if self.long_ctx_type == "vector":
+            z_long_projected = self.z_long_mlp(h_long_ctx)
+            h_long_ctx_flow = z_long_projected.unsqueeze(-1).unsqueeze(-1).expand(B,-1,H,W)
+        else:
+            h_long_ctx_flow = h_long_ctx
+
+        object_flow_batch, residual_flow_batch, uncertainty_map_batch = self.flow_predictor(compensated_bev, h_short_ctx, h_long_ctx_flow, delay_map)
+        return object_flow_batch, residual_flow_batch, uncertainty_map_batch
+
 class FeatureWarper(nn.Module):
     def get_grid(self, B, H, W, device):
         shifts_x = torch.arange(0, W, 1, dtype=torch.float32, device=device)
@@ -53,32 +210,14 @@ class FeatureWarper(nn.Module):
         grid_dst = torch.stack((shifts_x, shifts_y), dim=0).unsqueeze(0).repeat(B, 1, 1, 1)  # [B, 2, H, W]
         return grid_dst
 
-    def flow_warp(self, feats, flow, scaled_delay):  # flow is per unit time
+    def flow_warp(self, feats, flow, delay_step):  # flow is per unit time
         # feats: [B, C, H, W], flow: [B, 2, H, W] (dx, dy)
         B, C, H, W = feats.shape
         grid_dst = self.get_grid(B, H, W, feats.device)  # Base grid for destination
 
         # Total displacement: flow * delay
-        total_displacement = flow * scaled_delay  # scaled_delay is (t-t0)
+        total_displacement = flow * delay_step  # scaled_delay is (t-t0)
 
-        # Source coordinates in the original feature map: destination_coords - displacement
-        # grid_src = grid_dst - total_displacement # This is if flow points from src to dst
-        # If flow points from t0 to t (i.e. where a point at t0 moves to at t),
-        # then to get value at grid_dst(t), we need to sample from grid_dst(t) - displacement = grid_src(t0)
-        # So, the sampling grid should be grid_dst - total_displacement
-
-        # The original code's get_grid for flow_warp_feats implies flow is added to grid_dst
-        # flow_grid = ((flow + grid_dst) / workspace - 1)
-        # This means 'flow' is the coordinate of the source pixel for each dest pixel.
-        # If our 'flow' is displacement (how much a pixel moves), then:
-        # source_coord_for_dest_pixel = dest_pixel_coord - displacement
-        # Let's assume our predicted flow O_j_bev is the displacement vector.
-
-        # Normalize coordinates for grid_sample: range [-1, 1]
-        # x_new = (x_old / (W-1)) * 2 - 1
-        # y_new = (y_old / (H-1)) * 2 - 1
-
-        # sampling_grid_pixels = grid_dst - total_displacement # These are pixel coordinates in source
         sampling_grid_pixels = grid_dst + total_displacement  # If flow is where points *come from*
 
         # Normalize sampling_grid_pixels to [-1, 1]
@@ -94,295 +233,94 @@ class FeatureWarper(nn.Module):
         )
         return warped_feats
 
-class TemporalContextEncoder(nn.Module):
-    """Encodes a sequence of BEV features (single granularity)"""
-    def __init__(self, C_in_granularity, D_out_context, num_history_frames):
-        super().__init__()
-        if num_history_frames>0:
-            self.conv3d = nn.Conv3d(C_in_granularity, D_out_context,
-                                    kernel_size=(min(num_history_frames, 3),3,3),# Kernel depth <= num_frames
-                                    padding=(min(num_history_frames, 3)//2 if min(num_history_frames, 3)>1 else 0,1,1))
-            self.norm = nn.BatchNorm2d(D_out_context)
-            self.relu = nn.ReLU()
-            self.pool = nn.AdaptiveAvgPool3d((1,None,None)) #Pool along time dim
-        else: #No history
-            self.dummy_param = nn.Parameter(torch.empty(0))
-
-    def regroup(self, x, record_len):
-        cum_sum_len = torch.cumsum(record_len, dim=0)
-        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
-        return split_x
-
-    def forward(self, history_bev_list, record_len):
-        # history_bev_list: list of [B, C_in, H, W]
-        if not history_bev_list:
-            return None
-
-        B = len(record_len)
-        batch_history_bev_list = self.regroup(history_bev_list, record_len)
-        bev_final = []
-        for b in range(B):
-            N = record_len[b]
-            history_bev = batch_history_bev_list[b]
-            if history_bev.dim() == 3:
-                stacked_history = torch.stack(history_bev, dim=1).unsqueeze(0) #[1,C,numframes,H,W]
-            elif history_bev[0].dim() == 4:
-                stacked_history = torch.cat(history_bev, dim=0).unsqueeze(0).permute(0,2,1,3,4) # [1, C, NumFrames, H,W]
-            else:
-                raise ValueError("Unsupported history tensor dim")
-
-            x = self.relu(self.norm(self.conv3d(stacked_history)))
-            x = self.pool(x)
-            bev_final.append(x)
-        bev_final = torch.cat(bev_final, dim=0)
-        return bev_final
-
-class BEVFlowPredictor(nn.Module):
-    def __init__(self, D_short_ctx, D_long_ctx, D_current_feat,
-                D_hidden, num_flow_channels=2, num_uncertainty_channels=1):
-        super().__init__()
-        input_channels = D_current_feat
-        if D_short_ctx > 0: input_channels += D_short_ctx
-        if D_long_ctx > 0: input_channels += D_long_ctx
-        input_channels += 1 #For delay scalar map
-
-        #U-Net like structure
-        self.encoder1 = BasicConvBlock(input_channels, D_hidden)
-        self.encoder2 = BasicConvBlock(D_hidden, D_hidden * 2, stride=2)
-        self.encoder3 = BasicConvBlock(D_hidden * 2, D_hidden * 4, stride=2)
-
-        self.decoder2 = BasicConvBlock(D_hidden * 4 + D_hidden * 2, D_hidden * 2)  # Skip conn
-        self.upsample2 = nn.ConvTranspose2d(D_hidden * 2, D_hidden * 2, kernel_size=2, stride=2)
-
-        self.decoder1 = BasicConvBlock(D_hidden * 2 + D_hidden, D_hidden)  # Skip conn
-        self.upsample1 = nn.ConvTranspose2d(D_hidden, D_hidden, kernel_size=2, stride=2)
-
-        self.flow_head = nn.Conv2d(D_hidden, num_flow_channels, kernel_size=3, padding=1)
-        self.uncertainty_head = nn.Conv2d(D_hidden, num_uncertainty_channels, kernel_size=3, padding=1)
-
-        nn.init.zeros_(self.flow_head.weight)
-        if self.flow_head.bias is not None: nn.init.zeros_(self.flow_head.bias)
-
-    def forward(self, current_F_cat, short_term_ctx, long_term_ctx, delay_scalar_map):
-        # current_F_cat: [B, C_V+C_F+C_D, H, W]
-        # short_term_ctx: [B, D_short_ctx, H, W] or None
-        # long_term_ctx: [B, D_long_ctx, H, W] or None (can be global vector tiled too)
-        # delay_scalar_map: [B, 1, H, W]
-        input_list = [current_F_cat]
-        if short_term_ctx is not None:
-            # Long-term context can modulate short-term context
-            if long_term_ctx is not None:
-                # Example: FiLM-like modulation or simple concat + conv
-                # For simplicity, concat here
-                # Ensure long_term_ctx is spatially aligned if it's a map
-                # If long_term_ctx is global, tile it.
-                # If both are maps:
-                # combined_short_long = torch.cat([short_term_ctx, long_term_ctx], dim=1)
-                # refined_short_ctx = self.short_long_refiner(combined_short_long) # some conv
-                # input_list.append(refined_short_ctx)
-                input_list.append(short_term_ctx)
-                input_list.append(long_term_ctx)
-            else:
-                input_list.append(short_term_ctx)
-        elif long_term_ctx is not None:# Only long term available
-            input_list.append(long_term_ctx)
-        input_list.append(delay_scalar_map)
-
-        x = torch.cat(input_list, dim=1)
-
-        enc1 = self.encoder1(x)  # D_hidden
-        enc2 = self.encoder2(enc1)  # D_hidden*2
-        enc3 = self.encoder3(enc2)  # D_hidden*4
-
-        dec2 = self.upsample2(enc3)  # D_hidden*2
-        dec2 = torch.cat([dec2, enc2], dim=1)  # Skip
-        dec2 = self.decoder2(dec2)  # D_hidden*2
-
-        dec1 = self.upsample1(dec2)  # D_hidden
-        dec1 = torch.cat([dec1, enc1], dim=1)  # Skip
-        dec1 = self.decoder1(dec1)  # D_hidden
-
-        flow = self.flow_head(dec1)
-        uncertainty = torch.sigmoid(self.uncertainty_head(dec1))
-        return flow, uncertainty
-
 class MultiGranularityBevDelayCompensation(nn.Module):
     def __init__(self, args_mgdc_bev):
         super().__init__()
         self.C_V = args_mgdc_bev['C_V']
         self.C_F = args_mgdc_bev['C_F']
         self.C_D = args_mgdc_bev['C_D']
-        self.D_short_ctx_per_gran = args_mgdc_bev['D_short_ctx_per_granularity']
-        self.D_long_ctx_per_gran = args_mgdc_bev['D_long_ctx_per_granularity']
-        self.num_short_history = args_mgdc_bev['num_short_history_frames']
-        self.num_long_history = args_mgdc_bev['num_long_history_frames']
-        # Short-term encoders for each granularity
-        if self.C_V > 0 and self.num_short_history > 0:
-            self.short_encoder_vox = TemporalContextEncoder(self.C_V, self.D_short_ctx_per_gran, self.num_short_history)
-        if self.C_F > 0 and self.num_short_history > 0:
-            self.short_encoder_feat = TemporalContextEncoder(self.C_F, self.D_short_ctx_per_gran,
-                                                             self.num_short_history)
-        if self.C_D > 0 and self.num_short_history > 0:
-            self.short_encoder_det = TemporalContextEncoder(self.C_D, self.D_short_ctx_per_gran, self.num_short_history)
+        self.C_total_hist = self.C_V + self.C_F + self.C_D
 
-        # Long-term encoders for each granularity
-        if self.C_V > 0 and self.num_long_history > 0:
-            self.long_encoder_vox = TemporalContextEncoder(self.C_V, self.D_long_ctx_per_gran,
-                                                           self.num_long_history)
-        if self.C_F > 0 and self.num_long_history > 0:
-            self.long_encoder_feat = TemporalContextEncoder(self.C_F, self.D_long_ctx_per_gran,
-                                                            self.num_long_history)
-        if self.C_D > 0 and self.num_long_history > 0:
-            self.long_encoder_det = TemporalContextEncoder(self.C_D, self.D_long_ctx_per_gran,
-                                                           self.num_long_history)
-
-        # Combine context from all granularities
-        total_short_ctx_dim = 0
-        if self.C_V > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
-        if self.C_F > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
-        if self.C_D > 0 and self.num_short_history > 0: total_short_ctx_dim += self.D_short_ctx_per_gran
-
-        total_long_ctx_dim = 0
-        if self.C_V > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
-        if self.C_F > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
-        if self.C_D > 0 and self.num_long_history > 0: total_long_ctx_dim += self.D_long_ctx_per_gran
-
-        self.flow_predictor = BEVFlowPredictor(
-            D_short_ctx=total_short_ctx_dim, D_long_ctx=total_long_ctx_dim,D_current_feat=self.C_V + self.C_F + self.C_D,
-            D_hidden=args_mgdc_bev['flow_predictor_hidden_dim']
+        self.motion_predictor = HierarchicalMotionPredictor(
+            C_total_bev = self.C_V + self.C_F + self.C_D,
+            C_total_hist=self.C_total_hist,  # For history items
+            D_short_ctx=args_mgdc_bev['D_short_ctx'],
+            D_long_ctx_map=args_mgdc_bev['D_long_ctx_map'],  # if long_ctx_type='map'
+            D_long_ctx_vec=args_mgdc_bev['D_long_ctx_vec'],  # if long_ctx_type='vector'
+            num_short_frames=args_mgdc_bev['num_short_history_frames'],
+            num_long_frames=args_mgdc_bev['num_long_history_frames'],
+            flow_predictor_hidden_dim=args_mgdc_bev['flow_predictor_hidden_dim'],
+            long_ctx_type=args_mgdc_bev.get('long_ctx_type', 'map')
         )
+
         self.feature_warper = FeatureWarper()
 
-    def regroup(self, x, record_len):
-        cum_sum_len = torch.cumsum(record_len, dim=0)
-        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
-        return split_x
 
-    def forward(self,fused_bev_curr, short_history, long_history,
-                record_len, delay_time_span_scalar):
-        compensated_F_vox_t_list , compensated_F_feat_t_list , compensated_F_det_bev_t_list = [], [], []
-        current_F_vox, current_F_feat, current_F_det_bev = fused_bev_curr
-        current_F_vox, current_F_feat, current_F_det_bev = self.regroup(current_F_vox, record_len), self.regroup(current_F_feat, record_len),self.regroup(current_F_det_bev, record_len)
-        B = len(current_F_vox)
-        print("len(current_F_vox)=",len(current_F_vox))
-        short_history_vox, short_history_feat, short_history_det = short_history
-        print("len(short_history_vox)=", len(short_history_vox))
-        long_history_vox, long_history_feat, long_history_det = long_history
+    def _prepare_history_tensor_list(self, his_data_per_granularity):
+        """
+        Args:
+        history_data_per_granularity (list): e.g., short_his_vox.
+            结构: [[batch1_t0, batch2_t0, ...], [batch1_t1, batch2_t1, ...], ...]
+        Return:
+            list[torch.Tensor]:
+            一个Tensor列表，每个Tensor代表一个时间步，形状为 [A, C, H, W]。
+            e.g., [history_t0_tensor, history_t1_tensor, ...]
+        """
+        num_frames = len(his_data_per_granularity)
+        output_tensor_list = []
 
-        for bs in range(B):
-            cav_num, _, h, w = current_F_vox[bs].shape
-            if cav_num == 1: #没有协作车辆只有ego-vehicle
-                compensated_F_vox_t_list.append(current_F_vox[bs])
-                compensated_F_feat_t_list.append(current_F_feat[bs])
-                compensated_F_det_bev_t_list.append(current_F_det_bev[bs])
-                continue
+        for i in range(num_frames):
+            # history_data_per_granularity[i] 是一个包含该时间步所有batch数据的列表
+            batched_tensor_at_t = torch.cat(his_data_per_granularity[i], dim=0)
+            output_tensor_list.append(batched_tensor_at_t)
+        return output_tensor_list
 
-            s_vox, s_feat, s_det = short_history_vox[bs], short_history_feat[bs], short_history_det[bs]
-            s_ctx_vox = self.short_encoder_vox(s_vox)
-            s_ctx_feat = self.short_encoder_feat(s_feat)
-            s_ctx_det = self.short_encoder_det(s_det)
+    def forward(self, compensated_bev, short_his_list, long_his_list, delay_steps):
+        # len(record_len) = batch_size(B)
+        # record_len[i]=cav_num_i
+        #current_F_fused = [vox_bev, feat_bev, det_bev]
+        #vox_bev:[_,C_vox,H,W]
+        #feat_bev:[_,C_feat,H,W]
+        #det_bev:[_,C_det,H,W]
+        #short_his_list = [short_his_vox, short_his_feat, short_his_det]
+        #long_his_list = [long_his_vox, long_his_feat, long_his_det]
+        #len(short_his_vox)=num_short_frames
+        #len(long_his_vox)=num_long_frames
+        #short_his_vox[0] = [batch1_vox_bev, batch2_vox_bev...]  len(short_his_vox[0])=batch_size
+        #batchi_vox_bev.shape = cav_num, C_vox, H, W (cav_num指每个batch中所有agent的数量)
 
-            short_term_contexts = [c for c in [s_ctx_vox, s_ctx_feat, s_ctx_det] if c is not None]
-            full_short_ctx = torch.cat(short_term_contexts, dim=1)
+        long_his_vox, long_his_feat, long_his_det = long_his_list
 
-            # Encode long-term history
-            l_ctx_vox, l_ctx_feat, l_ctx_det = None, None, None
-            l_vox, l_feat, l_det = long_history_vox[bs], long_history_feat[bs], long_history_det[bs]
-            l_ctx_vox = self.long_encoder_vox(l_vox)
-            l_ctx_feat = self.long_encoder_feat(l_feat)
-            l_ctx_det = self.long_encoder_det(l_det)
 
-            long_term_contexts = [c for c in [l_ctx_vox, l_ctx_feat, l_ctx_det] if c is not None]
-            full_long_ctx = torch.cat(long_term_contexts, dim=1)
+        short_his_vox_tensors = self._prepare_history_tensor_list(short_his_list[0])
+        short_his_fea_tensors = self._prepare_history_tensor_list(short_his_list[1])
+        short_his_det_tensors = self._prepare_history_tensor_list(short_his_list[2])
 
-            # Prepare current features and delay map
-            current_F_parts = []
-            if current_F_vox[bs] is not None:
-                current_F_parts.append(current_F_vox[bs])
-            else:
-                current_F_parts.append(torch.zeros(cav_num, self.C_V, h, w,
-                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
-                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))  # Add zeros if None
+        long_his_vox_tensors = self._prepare_history_tensor_list(long_his_list[0])
+        long_his_fea_tensors = self._prepare_history_tensor_list(long_his_list[1])
+        long_his_det_tensors = self._prepare_history_tensor_list(long_his_list[2])
 
-            if current_F_feat[bs] is not None:
-                current_F_parts.append(current_F_feat[bs])
-            else:
-                current_F_parts.append(torch.zeros(cav_num, self.C_F, h, w,
-                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
-                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
+        num_short_frames = len(short_his_vox_tensors)
+        num_long_frames = len(long_his_vox_tensors)
 
-            if current_F_det_bev[bs] is not None:
-                current_F_parts.append(current_F_det_bev[bs])
-            else:
-                current_F_parts.append(torch.zeros(cav_num, self.C_D, h, w,
-                                                   device=l_ctx_vox.device if l_ctx_vox is not None else (
-                                                       s_ctx_vox.device if s_ctx_vox is not None else 'cpu')))
+        #将每个时间步的三个粒度特征拼接在一起
+        short_his_cat_tensors = [torch.cat([short_his_vox_tensors[i], short_his_fea_tensors[i], short_his_det_tensors[i]], dim=1) for i in range(num_short_frames)]
+        long_his_cat_tensors = [torch.cat([long_his_vox_tensors[i], long_his_fea_tensors[i], long_his_det_tensors[i]], dim=1) for i in range(num_long_frames)]
 
-            current_F_cat = torch.cat(current_F_parts, dim=1)
+        #进行运动预测
+        object_flow, residual_flow, uncertainty= self.motion_predictor(compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay_steps)
 
-            delay_map = torch.full((cav_num, 1, h, w), delay_time_span_scalar,
-                                   device=current_F_cat.device, dtype=current_F_cat.dtype)
+        final_flow = object_flow + residual_flow
 
-            # Predict flow and uncertainty
-            # The BEVFlowPredictor needs to handle None for full_short_ctx or full_long_ctx
-            # (e.g., by having its input_channels calculation be dynamic or by passing zero tensors)
-            # For now, flow_predictor init assumes fixed D_short_ctx, D_long_ctx.
-            # If full_short_ctx is None, pass zeros of expected shape.
-            if full_short_ctx is None:
-                total_short_ctx_dim = self.flow_predictor.encoder1.conv.in_channels - \
-                                      (self.C_V + self.C_F + self.C_D) - 1 - \
-                                      (full_long_ctx.shape[1] if full_long_ctx is not None else 0)
-                if total_short_ctx_dim > 0:
-                    full_short_ctx = torch.zeros(cav_num, total_short_ctx_dim, h, w, device=current_F_cat.device)
-                else:  # This case implies D_short_ctx was 0
-                    full_short_ctx = None
+        predicted_F_vox = self.feature_warper.flow_warp(compensated_bev[:,0:self.C_V,:,:], final_flow, delay_steps)
+        predicted_F_fea = self.feature_warper.flow_warp(compensated_bev[:,self.C_V:self.C_V+self.C_F,:,:], final_flow, delay_steps)
+        predicted_F_det = self.feature_warper.flow_warp(compensated_bev[:,self.C_V+self.C_F:,:,:], final_flow, delay_steps)
 
-            if full_long_ctx is None:
-                total_long_ctx_dim = self.flow_predictor.encoder1.conv.in_channels - \
-                                     (self.C_V + self.C_F + self.C_D) - 1 - \
-                                     (full_short_ctx.shape[1] if full_short_ctx is not None else 0)
-                if total_long_ctx_dim > 0:
-                    full_long_ctx = torch.zeros(cav_num, total_long_ctx_dim, h, w, device=current_F_cat.device)
-                else:
-                    full_long_ctx = None
+        return predicted_F_vox,predicted_F_fea,predicted_F_det
 
-            flow_field, uncertainty_map = self.flow_predictor(
-                current_F_cat, full_short_ctx, full_long_ctx, delay_map
-            )
 
-            # Warp features
-            compensated_F_vox_t, compensated_F_feat_t, compensated_F_det_bev_t = None, None, None
-            if current_F_vox is not None:
-                compensated_F_vox_t = self.feature_warper.flow_warp(current_F_vox, flow_field,
-                                                                    delay_time_span_scalar)
-                compensated_F_vox_t = compensated_F_vox_t * (1 - uncertainty_map)
-            compensated_F_vox_t_list.append(compensated_F_vox_t)
 
-            if current_F_feat is not None:
-                compensated_F_feat_t = self.feature_warper.flow_warp(current_F_feat, flow_field,
-                                                                     delay_time_span_scalar)
-                compensated_F_feat_t = compensated_F_feat_t * (1 - uncertainty_map)
-            compensated_F_feat_t_list.append(compensated_F_feat_t)
 
-            if current_F_det_bev is not None:
-                compensated_F_det_bev_t = self.feature_warper.flow_warp(current_F_det_bev, flow_field,
-                                                                        delay_time_span_scalar)
-                compensated_F_det_bev_t = compensated_F_det_bev_t * (1 - uncertainty_map)
-            compensated_F_det_bev_t_list.append(compensated_F_det_bev_t)
-            # Note: Spatial transformation to ego frame is not explicitly done here.
-            # It's assumed that the flow_field implicitly learns to predict motion
-            # such that when warped, features are pseudo-aligned to where they *would be*
-            # in the ego's view at current time, if they were still in collab's coord system.
-            # A final explicit spatial transform using pairwise_t_matrix might still be needed
-            # AFTER this compensation, before fusion with ego.
-            # Or, the `delay_time_span_scalar` and history implicitly guide the flow predictor
-            # to output flow in a "common" or "ego-aligned" sense if training data supports it.
-            # This is a subtle but important point. Usually, flow is in pixel space of the input.
-
-        compensated_F_vox_t_list = torch.cat(compensated_F_vox_t_list, dim=0)
-        compensated_F_feat_t_list = torch.cat(compensated_F_feat_t_list, dim=0)
-        compensated_F_det_bev_t_list = torch.cat(compensated_F_det_bev_t_list, dim=0)
-        return compensated_F_vox_t_list, compensated_F_feat_t_list, compensated_F_det_bev_t_list, uncertainty_map
 
 
 
