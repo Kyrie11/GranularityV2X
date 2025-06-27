@@ -53,6 +53,9 @@ class PointPillarHow2comm(nn.Module):
                                   kernel_size=1)
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
+
+        self.avg_pool = nn.AvgPool2d(kernel_size=2, stride=2)
+
         if args['backbone_fix']:
             self.backbone_fix()
 
@@ -133,13 +136,17 @@ class PointPillarHow2comm(nn.Module):
 
             batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
+            spatial_features = self.avg_pool(spatial_features)
+            his_feat.append(spatial_features)
+
             feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
-            his_feat.append(spatial_features_2d)
+
             vox_bev = batch_dict['vox_bev']
             #下采样
             vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
             his_vox.append(vox_bev)
+
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
             # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
