@@ -253,7 +253,13 @@ class ConvGRUCell(nn.Module):
         super(ConvGRUCell, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        padding = kernel_size // 2
+        if isinstance(kernel_size, int):
+            # 如果 kernel_size 是一个整数 (例如 3), padding 也应该是一个整数 (例如 1)
+            padding = kernel_size // 2
+        elif isinstance(kernel_size, tuple):
+            # 如果 kernel_size 是一个元组 (例如 (3, 3) 或 (3, 5)),
+            # padding 应该是一个对每个维度都计算的元组 (例如 (1, 1) 或 (1, 2))
+            padding = (kernel_size[0] // 2, kernel_size[1] // 2)
 
         self.conv_gates = nn.Conv2d(self.input_dim + self.hidden_dim, 2 * self.hidden_dim, kernel_size, padding=padding)
         self.conv_can = nn.Conv2d(self.input_dim + self.hidden_dim, self.hidden_dim, kernel_size, padding=padding)
