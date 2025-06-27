@@ -140,7 +140,6 @@ class ContextFusionMotionPredictor(nn.Module):
         his_for_long_gru = long_term_his_fused[::-1]
 
         # ---  编码长短期上下文 ---
-        gru_hidden_channels = self.long_term_encoder.hidden_size
 
         # 长期上下文
         # long_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
