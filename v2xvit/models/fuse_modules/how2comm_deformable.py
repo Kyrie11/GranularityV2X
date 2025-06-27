@@ -30,7 +30,7 @@ class How2comm(nn.Module):
         #ego增强模块
         self.ego_enhance_model = AgentSelfEnhancement(d_model=256, num_history_frames=3, nhead_transformer=8, num_transformer_layers=2)
         #最终融合模块
-        self.granularity_fusion = MultiGranularityFusionNet(args)
+        self.granularity_fusion = MultiGranularityFusionNet(args['granularity_trans'])
         # 通信模块
         self.communication_net = Communication(c_vox=10, c_feat=64, c_det=10)
 
