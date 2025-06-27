@@ -22,6 +22,7 @@ class How2comm(nn.Module):
         self.communication_flag = args['communication_flag']
         self.downsample_rate = args['downsample_rate']
         self.async_flag = False
+
         self.discrete_ratio = args['voxel_size'][0]
 
         #时延补偿模块
