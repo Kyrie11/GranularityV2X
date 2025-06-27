@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn import F
+from torch.nn import functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from v2xvit.models.comm_modules.basic_model import *
 from typing import List, Dict
