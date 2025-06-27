@@ -82,6 +82,8 @@ class AgentSelfEnhancement(nn.Module):
         # [B, T, C, H, W] -> [B, H, W, T, C]
         temporal_context = feature_history_tensor.permute(0, 3, 4, 1, 2)
         # 添加时间位置编码 (会自动广播)
+        print("temporal_context.shape=", temporal_context.shape)
+        print("self.temporal_pos_embedding.unsqueeze(1).unsqueeze(1).shape=",self.temporal_pos_embedding.unsqueeze(1).unsqueeze(1).shape)
         temporal_context = temporal_context + self.temporal_pos_embedding.unsqueeze(1).unsqueeze(1)
 
         # 展平空间维度，送入Transformer
