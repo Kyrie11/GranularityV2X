@@ -209,7 +209,7 @@ class UtilityNetwork(nn.Module):
 
 class AdvancedCommunication(nn.Module):
     def __init__(self, c_vox, c_feat, c_det, c_semantic=32, lambda_rec=0.5):
-        super(Communication, self).__init__()
+        super(AdvancedCommunication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
         #效益网络
         self.utility_net =UtilityNetwork(collab_bev_channels=90,
