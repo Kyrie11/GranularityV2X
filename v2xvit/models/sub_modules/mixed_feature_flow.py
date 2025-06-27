@@ -131,7 +131,7 @@ class HierarchicalMotionPredictor(nn.Module):
         self.temporal_fusion_gru = ConvGRUCell(self.D_hidden, self.D_hidden, kernel_size=3)
 
         # NEW: 定义时间嵌入层
-        self.delay_embedding = nn.Embedding(self.delay_steps, self.delay_embedding_dim)
+        self.delay_embedding = nn.Embedding(self.delay_steps+1, self.delay_embedding_dim)
 
         self.flow_predictor = BEVFlowPredictor(
             D_in=self.D_hidden + self.delay_embedding_dim,
