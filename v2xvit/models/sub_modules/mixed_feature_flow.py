@@ -257,13 +257,20 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         long_his_vox = his_vox[delay_steps::self.long_gaps]
         long_his_feat = his_feat[delay_steps::self.long_gaps]
         long_his_det = his_det[delay_steps::self.long_gaps]
-        print("long_his_vox[0].shape=",long_his_vox[0].shape)
+        # print("long_his_vox[0].shape=",long_his_vox[0].shape)
         num_short_frames = len(short_his_vox)
         num_long_frames = len(long_his_vox)
 
-        #将每个时间步的三个粒度特征拼接在一起
-        short_his_cat_tensors = [torch.cat([short_his_vox[i], short_his_feat[i], short_his_det[i]], dim=1) for i in range(num_short_frames)]
-        long_his_cat_tensors = [torch.cat([long_his_vox[i], long_his_feat[i], long_his_det[i]], dim=1) for i in range(num_long_frames)]
+        # 将每个时间步的三个粒度特征拼接在一起
+        short_his_cat_tensors = []
+        for i in range(num_short_frames):
+            short_his_cat_tensors.append(torch.cat([short_his_vox[i],short_his_feat[i],short_his_det[i]], dim=1))
+        long_his_cat_tensors = []
+        for i in range(num_long_frames):
+            long_his_cat_tensors.append(torch.cat([long_his_vox[i],long_his_feat[i],long_his_det[i]], dim=1))
+
+        # short_his_cat_tensors = [torch.cat([short_his_vox[i], short_his_feat[i], short_his_det[i]], dim=1) for i in range(num_short_frames)]
+        # long_his_cat_tensors = [torch.cat([long_his_vox[i], long_his_feat[i], long_his_det[i]], dim=1) for i in range(num_long_frames)]
         print("long_his_cat_tensors[0].shape=", long_his_cat_tensors[0].shape)
 
         delay_tensor = torch.full((B,), delay_steps, dtype=torch.long, device=his_vox[0].device)
