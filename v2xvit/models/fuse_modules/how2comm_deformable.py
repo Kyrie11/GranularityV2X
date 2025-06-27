@@ -64,7 +64,7 @@ class How2comm(nn.Module):
             # updated_curr_bev[flat_idx] = enhanced_feature_i
         return torch.cat(curr_bev_batch, dim=0)
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, fused_his=None, delay=0):
+    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, delay=0):
         vox_bev, feat_bev, det_bev = bev_list
         _, _, H, W = feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
@@ -80,9 +80,9 @@ class How2comm(nn.Module):
 
 
 
-        if fused_his and delay != 0:
+        if history and delay != 0:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_F_vox_t, comp_F_feat_t, comp_F_det_t = self.mgdc_bev_compensator(fused_his,delay, record_len)
+            comp_F_vox_t, comp_F_feat_t, comp_F_det_t = self.mgdc_bev_compensator(history,delay, record_len)
             offset_loss = self.compensation_criterion(predicted_bevs=[comp_F_vox_t, comp_F_feat_t, comp_F_det_t], ground_truth_bevs=bev_list)
             # 把ego-agent的当前帧补偿回去
             comp_F_vox_list = self.regroup(comp_F_vox_t, record_len)
@@ -102,7 +102,7 @@ class How2comm(nn.Module):
             offset_loss = torch.zeros(1).to(feat_bev.device)
 
         #把增强后的ego特征放入
-        his_feat = fused_his[1]  # list of [B,C,H,W]
+        his_feat = history[1]  # list of [B,C,H,W]
         # 对ego的帧进行增强
         feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:3], record_len)  # 取第1到第3帧作为历史
 
