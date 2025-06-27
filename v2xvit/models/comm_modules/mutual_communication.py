@@ -214,7 +214,7 @@ class AdvancedCommunication(nn.Module):
         #效益网络
         self.utility_net =UtilityNetwork(collab_bev_channels=90,
             granularity_coeff_dim=3,  # X_C 的维度
-            semantic_coeff_dim=self.semantic_channel, # X_G 的维度
+            semantic_coeff_dim=c_semantic, # X_G 的维度
             bandwidth_vector_dim=3)
 
         # 注册成本向量为buffer
