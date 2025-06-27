@@ -160,6 +160,7 @@ class HierarchicalMotionPredictor(nn.Module):
             h_short = self.temporal_fusion_gru(encoded_frame, h_short)
 
         delay = delay.long()
+        print("delay=", delay)
         delay_emb_vec = self.delay_embedding(delay)
         # 扩展成空间特征图
         delay_map = delay_emb_vec.view(B, self.delay_embedding_dim, 1, 1).expand(B, self.delay_embedding_dim, H, W)
