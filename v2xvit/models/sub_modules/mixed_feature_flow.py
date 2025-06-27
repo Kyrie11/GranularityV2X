@@ -78,11 +78,11 @@ class BEVFlowPredictor(nn.Module):
 
         object_flow = self.object_flow_head(dec1)
         residual_flow = self.residual_flow_head(dec1)
-        uncertainty_map = self.uncertainty_head(dec1)
+        # uncertainty_map = self.uncertainty_head(dec1)
 
 
 
-        return object_flow, residual_flow, uncertainty_map
+        return object_flow, residual_flow
 
 
 class ConvGRUCell(nn.Module):
@@ -113,12 +113,12 @@ class ConvGRUCell(nn.Module):
 class HierarchicalMotionPredictor(nn.Module):
     def __init__(self, args_mgdc_bev):
         super(HierarchicalMotionPredictor, self).__init__()
-        self.c_vox = args_mgdc_bev.get('c_vox', 10)
-        self.c_feat = args_mgdc_bev.get('c_feat', 64)
-        self.c_det = args_mgdc_bev.get('c_det', 16)
+        self.c_vox = args_mgdc_bev.get('C_V', 10)
+        self.c_feat = args_mgdc_bev.get('C_F', 64)
+        self.c_det = args_mgdc_bev.get('C_D', 16)
         self.D_hidden = args_mgdc_bev.get('D_hidden', 128)
 
-        self.delay_steps = args_mgdc_bev.get('delay_steps', 3)
+        self.delay_steps = args_mgdc_bev.get('delay', 3)
         self.delay_embedding_dim = args_mgdc_bev.get('delay_embedding_dim', 32)
 
         self.feature_encoder = nn.Sequential(
@@ -138,7 +138,7 @@ class HierarchicalMotionPredictor(nn.Module):
             D_hidden=self.D_hidden
         )
 
-    def forward(self, compensated_bev, short_his_cat_tensors, long_his_cat_tensors, delay):
+    def forward(self, short_his_cat_tensors, long_his_cat_tensors, delay):
         #len(short_history_list)=帧数
         #len(short_history_list[0])=batch_size
         B,_,H,W = short_his_cat_tensors[0].shape
@@ -179,7 +179,7 @@ class FeatureWarper(nn.Module):
 
     def flow_warp(self, feats, flow, delay_step):  # flow is per unit time
         # feats: [B, C, H, W], flow: [B, 2, H, W] (dx, dy)
-        B, C, H, W = feats.shape
+        B, _, H, W = feats.shape
         grid_dst = self.get_grid(B, H, W, feats.device)  # Base grid for destination
 
         # Total displacement: flow * delay
@@ -203,9 +203,11 @@ class FeatureWarper(nn.Module):
 class MultiGranularityBevDelayCompensation(nn.Module):
     def __init__(self, args_mgdc_bev):
         super(MultiGranularityBevDelayCompensation, self).__init__()
-        self.c_vox = args_mgdc_bev.get('c_vox', 10)
-        self.c_feat = args_mgdc_bev.get('c_feat', 64)
-        self.c_det = args_mgdc_bev.get('c_det', 16)
+        self.c_vox = args_mgdc_bev.get('C_V', 10)
+        self.c_feat = args_mgdc_bev.get('C_F', 64)
+        self.c_det = args_mgdc_bev.get('C_D', 16)
+        self.short_frames = args_mgdc_bev.get("short_frames", 3)
+        self.long_gaps = args_mgdc_bev.get("long_gaps", 3)
 
         self.motion_predictor = HierarchicalMotionPredictor(args_mgdc_bev)
 
@@ -231,7 +233,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
             output_tensor_list.append(batched_tensor_at_t)
         return output_tensor_list
 
-    def forward(self, short_his_list, long_his_list, delay_steps):
+    def forward(self, fused_his, delay_steps, record_len):
         # len(record_len) = batch_size(B)
         # record_len[i]=cav_num_i
         #current_F_fused = [vox_bev, feat_bev, det_bev]
@@ -244,36 +246,34 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         #len(long_his_vox)=num_long_frames
         #short_his_vox[0] = [batch1_vox_bev, batch2_vox_bev...]  len(short_his_vox[0])=batch_size
         #batchi_vox_bev.shape = cav_num, C_vox, H, W (cav_num指每个batch中所有agent的数量)
+        his_vox, his_feat, his_det = fused_his
+        B, _, H, W = his_vox[0].shape
+        short_his_vox = his_vox[delay_steps:delay_steps+self.short_frames]
+        short_his_feat = his_feat[delay_steps:delay_steps+self.short_frames]
+        short_his_det = his_det[delay_steps:delay_steps+self.short_frames]
 
-        long_his_vox, long_his_feat, long_his_det = long_his_list
 
 
-        short_his_vox_tensors = self._prepare_history_tensor_list(short_his_list[0])
-        short_his_fea_tensors = self._prepare_history_tensor_list(short_his_list[1])
-        short_his_det_tensors = self._prepare_history_tensor_list(short_his_list[2])
+        long_his_vox = his_vox[delay_steps::self.long_gaps]
+        long_his_feat = his_feat[delay_steps::self.long_gaps]
+        long_his_det = his_det[delay_steps::self.long_gaps]
 
-        B,_,H,W = short_his_vox_tensors[0].shape
-
-        long_his_vox_tensors = self._prepare_history_tensor_list(long_his_list[0])
-        long_his_fea_tensors = self._prepare_history_tensor_list(long_his_list[1])
-        long_his_det_tensors = self._prepare_history_tensor_list(long_his_list[2])
-
-        num_short_frames = len(short_his_vox_tensors)
-        num_long_frames = len(long_his_vox_tensors)
+        num_short_frames = len(short_his_vox)
+        num_long_frames = len(long_his_vox)
 
         #将每个时间步的三个粒度特征拼接在一起
-        short_his_cat_tensors = [torch.cat([short_his_vox_tensors[i], short_his_fea_tensors[i], short_his_det_tensors[i]], dim=1) for i in range(num_short_frames)]
-        long_his_cat_tensors = [torch.cat([long_his_vox_tensors[i], long_his_fea_tensors[i], long_his_det_tensors[i]], dim=1) for i in range(num_long_frames)]
+        short_his_cat_tensors = [torch.cat([short_his_vox[i], short_his_feat[i], short_his_det[i]], dim=1) for i in range(num_short_frames)]
+        long_his_cat_tensors = [torch.cat([long_his_vox[i], long_his_feat[i], long_his_det[i]], dim=1) for i in range(num_long_frames)]
 
-        delay_tensor = torch.full((B,), delay_steps, dtype=torch.long, device=short_his_vox_tensors[0].device)
+        delay_tensor = torch.full((B,), delay_steps, dtype=torch.long, device=his_vox[0].device)
         #进行运动预测
-        object_flow, residual_flow, uncertainty= self.motion_predictor(short_his_cat_tensors, long_his_cat_tensors, delay_tensor)
+        object_flow, residual_flow = self.motion_predictor(short_his_cat_tensors, long_his_cat_tensors, delay_tensor)
 
         final_flow = object_flow + residual_flow
 
-        predicted_F_vox = self.feature_warper.flow_warp(compensated_bev[:,0:self.c_vox,:,:], final_flow, delay_steps)
-        predicted_F_fea = self.feature_warper.flow_warp(compensated_bev[:,self.c_vox:self.c_vox+self.c_feat,:,:], final_flow, delay_steps)
-        predicted_F_det = self.feature_warper.flow_warp(compensated_bev[:,self.c_vox+self.c_feat:,:,:], final_flow, delay_steps)
+        predicted_F_vox = self.feature_warper.flow_warp(short_his_vox[0], final_flow, delay_steps)
+        predicted_F_fea = self.feature_warper.flow_warp(short_his_feat[0], final_flow, delay_steps)
+        predicted_F_det = self.feature_warper.flow_warp(short_his_det[0], final_flow, delay_steps)
 
         return predicted_F_vox,predicted_F_fea,predicted_F_det
 

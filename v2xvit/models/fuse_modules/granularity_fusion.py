@@ -2,43 +2,54 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SEBlock(nn.Module):
-    def __init__(self, channel, reduction=16):
-        super(SEBlock, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channel, channel // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channel // reduction, channel, bias=False),
-            nn.Sigmoid()
+class HierarchicalFusion(nn.Module):
+    def __init__(self, in_channels=64, bev_channels=64):
+        super().__init__()
+        # 体素特征增强分支
+        self.voxel_fusion = nn.Sequential(
+            nn.Conv2d(bev_channels, bev_channels, 3, padding=1),
+            nn.BatchNorm2d(bev_channels),
+            nn.ReLU()
         )
 
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y.expand_as(x)
+        # 稀疏特征增强分支
+        self.feature_fusion = nn.Sequential(
+            nn.Conv2d(in_channels, bev_channels, 3, padding=1),
+            nn.BatchNorm2d(bev_channels),
+            nn.ReLU()
+        )
 
+        # 跨模态注意力融合
+        self.cross_attention = nn.Sequential(
+            nn.Conv2d(bev_channels * 2, bev_channels // 2, 1),
+            nn.ReLU(),
+            nn.Conv2d(bev_channels // 2, 2, 1),
+            nn.Softmax(dim=1)
+        )
 
-class BasicConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, use_bn=True, use_relu=True):
-        super(BasicConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=not use_bn)
-        self.bn = nn.BatchNorm2d(out_channels) if use_bn else nn.Identity()
-        self.relu = nn.ReLU(inplace=True) if use_relu else nn.Identity()
+    def forward(self, ego_feat, voxel_bev, sparse_feat):
+        """
+        ego_feat: [B,64,H,W] 原始特征
+        voxel_bev: [B,64,H,W] 体素投影特征
+        sparse_feat: [B,64,H,W] 稀疏通信特征
+        """
+        # 体素特征增强
+        voxel_enhanced = self.voxel_fusion(voxel_bev)  # [B,64,H,W]
 
-    def forward(self, x):
-        return self.relu(self.bn(self.conv(x)))
+        # 稀疏特征增强
+        feature_enhanced = self.feature_fusion(sparse_feat)  # [B,64,H,W]
 
+        # 跨模态注意力权重
+        attention = self.cross_attention(
+            torch.cat([voxel_enhanced, feature_enhanced], dim=1))  # [B,2,H,W]
 
-class BEVPatchEmbed(nn.Module):
-    def __init__(self, C_in, embed_dim, patch_size):
-        super().__init__()
-        self.proj = nn.Conv2d(C_in, embed_dim, kernel_size=patch_size, stride=patch_size)
+        # 加权融合
+        fused_feat = (attention[:, 0:1] * voxel_enhanced +
+                      attention[:, 1:2] * feature_enhanced)  # [B,64,H,W]
 
-    def forward(self, x):
-        x = self.proj(x)  # [B, E, H', W']
-        return x.flatten(2).transpose(1, 2)  # [B, H'*W', E]
+        # 残差连接
+        return ego_feat + fused_feat
+
 
 class TemporalEncoderNtemp(nn.Module):
     def __init__(self, C_total_bev, D_temporal, num_layers=2, num_heads=4, dim_feedforward_factor=4):
