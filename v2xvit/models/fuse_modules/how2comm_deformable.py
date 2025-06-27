@@ -10,7 +10,7 @@ from icecream import ic
 
 from v2xvit.models.comm_modules.mutual_communication import AdvancedCommunication
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from v2xvit.models.sub_modules.mixed_feature_flow import MultiGranularityBevDelayCompensation
+from v2xvit.models.sub_modules.mixed_feature_flow import ContextFusionMotionPredictor
 from v2xvit.loss.flow_loss import CompensationLoss
 from v2xvit.models.fuse_modules.multi_granularity_fusion import AgentSelfEnhancement, MultiGranularityFusionNet
 
@@ -25,7 +25,7 @@ class How2comm(nn.Module):
         self.discrete_ratio = args['voxel_size'][0]
 
         #时延补偿模块
-        self.mgdc_bev_compensator = MultiGranularityBevDelayCompensation(args['mgdc_bev_args'])
+        self.mgdc_bev_compensator = ContextFusionMotionPredictor(args['mgdc_bev_args'])
         #时延补偿损失
         self.compensation_criterion = CompensationLoss(args['mgdc_bev_args'])
         #ego增强模块
@@ -65,7 +65,7 @@ class How2comm(nn.Module):
             # updated_curr_bev[flat_idx] = enhanced_feature_i
         return torch.cat(curr_bev_batch, dim=0)
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None, delay=0):
+    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None):
         vox_bev, feat_bev, det_bev = bev_list
         _, _, H, W = feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
@@ -80,15 +80,19 @@ class How2comm(nn.Module):
 
 
 
-
-        if history and delay != 0:
+        c_vox = vox_bev.shape[1]
+        c_feat = feat_bev.shape[1]
+        if history:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_F_vox_t, comp_F_feat_t, comp_F_det_t = self.mgdc_bev_compensator(history,delay, record_len)
-            offset_loss = self.compensation_criterion(predicted_bevs=[comp_F_vox_t, comp_F_feat_t, comp_F_det_t], ground_truth_bevs=bev_list)
+            comp_F_fused, _, _ = self.mgdc_bev_compensator(history)
+            comp_F_vox = comp_F_fused[:,0:c_vox,:,:]
+            comp_F_feat = comp_F_fused[:,c_vox:c_vox+c_feat,:,:]
+            comp_F_det = comp_F_fused[:,c_vox+c_feat:,:,:]
+            offset_loss = self.compensation_criterion(predicted_bevs=[comp_F_vox, comp_F_feat, comp_F_det], ground_truth_bevs=bev_list)
             # 把ego-agent的当前帧补偿回去
-            comp_F_vox_list = self.regroup(comp_F_vox_t, record_len)
-            comp_F_feat_list = self.regroup(comp_F_feat_t, record_len)
-            comp_F_det_list = self.regroup(comp_F_det_t, record_len)
+            comp_F_vox_list = self.regroup(comp_F_vox, record_len)
+            comp_F_feat_list = self.regroup(comp_F_feat, record_len)
+            comp_F_det_list = self.regroup(comp_F_det, record_len)
             vox_bev_list = self.regroup(vox_bev, record_len)
             feat_bev_list = self.regroup(feat_bev, record_len)
             det_bev_list = self.regroup(det_bev, record_len)

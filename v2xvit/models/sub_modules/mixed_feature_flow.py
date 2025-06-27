@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +14,171 @@ class BasicConvBlock(nn.Module):
 
     def forward(self, x):
         return self.relu(self.bn(self.conv(x)))
+
+
+class SingleInputFlowPredictor(nn.Module):
+    """一个简单的网络，接收单一的融合特征图，预测光流 + 可信度"""
+
+    def __init__(self, in_channels, middle_channels=64):
+        super().__init__()
+        self.conv_in = nn.Conv2d(in_channels, middle_channels, kernel_size=3, padding=1)
+        self.conv_res = nn.Conv2d(middle_channels, middle_channels, kernel_size=3, padding=1)
+        # 【修改】输出3个通道: dx, dy, scale
+        self.conv_out = nn.Conv2d(middle_channels, 3, kernel_size=1)
+
+    def forward(self, fused_context):
+        x = F.relu(self.conv_in(fused_context))
+        x = x + F.relu(self.conv_res(x))  # 加入残差连接
+        outputs = self.conv_out(x)
+
+        # 分离 flow 和 scale
+        flow = outputs[:, 0:2, :, :]  # 取前两个通道作为光流
+        scale = torch.sigmoid(outputs[:, 2:, :, :])  # 取最后一个通道，用sigmoid约束到0-1
+
+        return flow, scale
+
+class WarpingLayer(nn.Module):
+    """
+        使用光流场对特征图进行变形(warp)的模块。
+        它接收一个特征图和一个光流场，输出变形后的特征图。
+        这个模块的实现与输入特征图的通道数无关。
+    """
+    def __init__(self):
+        super(WarpingLayer, self).__init__()
+
+    def forward(self, x, flow):
+        B,C,H,W = x.shape
+        # 1. 创建一个标准化的网格 (identity grid)
+        # torch.meshgrid 创建了两个张量，分别代表每个像素的y和x坐标
+        grid_y, grid_x = torch.meshgrid(torch.arange(H, device=x.device, dtype=x.dtype),
+                                        torch.arange(W, device=x.device, dtype=x.dtype),
+                                        indexing='ij')
+        # 将x和y坐标堆叠起来，形成一个形状为 [H, W, 2] 的坐标网格
+        # 这个网格代表了每个输出像素应该从输入图像的哪个位置采样
+        grid = torch.stack((grid_x, grid_y), 2)
+
+        # 扩展到batch维度
+        grid = grid.unsqueeze(0).expand(B, -1, -1, -1)  # [B, H, W, 2]
+
+        # 2. 计算新的采样坐标
+        # F.grid_sample 需要的是绝对采样坐标，所以我们将原始网格坐标与光流位移相加
+        # flow 的形状是 [B, 2, H, W]，需要permute到 [B, H, W, 2] 来匹配grid
+        new_grid = grid + flow.permute(0, 2, 3, 1)
+
+        # 3. 将采样坐标归一化到 [-1, 1] 的范围
+        # 这是 F.grid_sample 的要求。它期望坐标在 [-1, 1] 的范围内，
+        # 其中 (-1, -1) 是左上角，(1, 1) 是右下角。
+        new_grid[..., 0] = 2 * new_grid[..., 0] / (W - 1) - 1
+        new_grid[..., 1] = 2 * new_grid[..., 1] / (H - 1) - 1
+
+        # 4. 执行采样
+        # F.grid_sample 会根据 new_grid 中的坐标，在输入特征图 x 上进行双线性插值采样
+        # padding_mode='zeros' 表示超出边界的区域用0填充
+        # align_corners=True 是一个重要的参数，确保了坐标变换的精确性
+        warped_x = F.grid_sample(x, new_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
+
+        return warped_x
+
+
+class ContextFusionMotionPredictor(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.short_frames = args.get("short_frames", 3)
+        self.long_interval = args.get("long_interval", 3)
+        c_vox = args.get("C_V")
+        c_feat = args.get("C_F")
+        c_det = args.get("C_D")
+        in_channels = c_vox + c_feat + c_det
+        gru_hidden_channels = args.get("gru_dim", 32)
+        delay_emb_dim = args.get("delay_dim", 32)
+        self.max_delay = args.get("max_delay", 6)
+
+        self.long_term_encoder = nn.ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
+        self.short_term_encoder = nn.ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
+        self.delay_embedding = nn.Embedding(max_delay + 1, delay_emb_dim)
+
+        fusion_input_channels = gru_hidden_channels * 2 + delay_emb_dim
+        self.context_fusion_net = nn.Sequential(
+            nn.Conv2d(fusion_input_channels, gru_hidden_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(gru_hidden_channels, gru_hidden_channels, kernel_size=1)
+        )
+
+        self.final_flow_predictor = SingleInputFlowPredictor(in_channels=gru_hidden_channels)
+        self.warping_layer = WarpingLayer()
+        self.refinement_net = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+
+    def forward(self, fused_his):
+        delay = random.randint(0, self.max_delay)
+        vox_list, feat_list, det_list = fused_his
+
+        fused_his = [torch.cat([vox_list[i], feat_list[i], det_list[i]], dim=1) for i in range(len(vox_list))]
+
+        #我们要时延预测的帧
+        fused_to_compensate = fused_his[delay]
+
+        B,C,H,W = fused_to_compensate.shape
+
+        device = fused_to_compensate.device
+
+        #确保有足够的历史帧
+        if delay+1 >= len(vox_list):
+            # 如果没有历史（delay是最后一帧），则无法预测运动，直接返回原始帧
+            # 同样返回零光流和中性scale，以保持输出格式一致
+            return fused_to_compensate, torch.zeros(B, 2, H, W, device=device), torch.ones(B, 1, H, W, device=device)
+
+        #提取delay后的帧作为历史
+        fused_his_sequence = fused_his[delay+1:]
+
+        #分割长短期历史
+        short_term_his_fused = fused_his_sequence[:self.short_frames]
+
+        long_term_his_fused = fused_his_sequence[::self.long_interval]
+
+        #远近时间倒排序
+        his_for_short_gru = short_term_his_fused[::-1]
+        his_for_long_gru = long_term_his_fused[::-1]
+
+        # ---  编码长短期上下文 ---
+        gru_hidden_channels = self.long_term_encoder.hidden_size
+
+        # 长期上下文
+        long_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
+        if his_for_long_gru:
+            for data in his_for_long_gru:
+                long_term_context = self.long_term_encoder(data, long_term_context)
+
+        # 短期上下文
+        short_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
+        if his_for_short_gru:
+            for data in his_for_short_gru:
+                short_term_context = self.short_term_encoder(data, short_term_context)
+
+        # --- 3. 融合上下文 ---
+        delay_emb = self.delay_embedding(delay.long())
+        delay_map = delay_emb.view(B, -1, 1, 1).expand(B, -1, H, W)
+        fusion_input = torch.cat([long_term_context, short_term_context, delay_map], dim=1)
+        final_fused_context = self.context_fusion_net(fusion_input)
+
+        # --- 4. 预测运动并外推 ---
+        predicted_flow_at_delay, scale = self.final_flow_predictor(final_fused_context)
+
+        delay_expanded = delay.float().view(B, 1, 1, 1)
+        extrapolated_flow = predicted_flow_at_delay * delay_expanded
+
+        # --- 5. 补偿与精炼 ---
+        warped_feature = self.warping_layer(fused_to_compensate, extrapolated_flow)
+        scaled_warped_feature = scale * warped_feature
+
+        refined_prediction = self.refinement_net(scaled_warped_feature)
+
+        return refined_prediction, extrapolated_flow, scale
+
+
+    def init_hidden(self, batch_size, image_size, device, hidden_channels):
+        H, W = image_size
+        return torch.zeros(batch_size, hidden_channels, H, W, device=device)
+
 
 
 class BEVFlowPredictor(nn.Module):
@@ -160,7 +327,6 @@ class HierarchicalMotionPredictor(nn.Module):
             h_short = self.temporal_fusion_gru(encoded_frame, h_short)
 
         delay = delay.long()
-        print("delay=", delay)
         delay_emb_vec = self.delay_embedding(delay)
         # 扩展成空间特征图
         delay_map = delay_emb_vec.view(B, self.delay_embedding_dim, 1, 1).expand(B, self.delay_embedding_dim, H, W)
