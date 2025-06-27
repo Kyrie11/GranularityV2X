@@ -93,9 +93,9 @@ class ContextFusionMotionPredictor(nn.Module):
         delay_emb_dim = args.get("delay_dim", 32)
         self.max_delay = args.get("max_delay", 6)
 
-        self.long_term_encoder = nn.ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
-        self.short_term_encoder = nn.ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
-        self.delay_embedding = nn.Embedding(max_delay + 1, delay_emb_dim)
+        self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
+        self.short_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
+        self.delay_embedding = nn.Embedding(self.max_delay + 1, delay_emb_dim)
 
         fusion_input_channels = gru_hidden_channels * 2 + delay_emb_dim
         self.context_fusion_net = nn.Sequential(
@@ -143,16 +143,12 @@ class ContextFusionMotionPredictor(nn.Module):
         gru_hidden_channels = self.long_term_encoder.hidden_size
 
         # 长期上下文
-        long_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
-        if his_for_long_gru:
-            for data in his_for_long_gru:
-                long_term_context = self.long_term_encoder(data, long_term_context)
+        # long_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
+        long_term_context = self.long_term_encoder(his_for_long_gru)
 
         # 短期上下文
-        short_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
-        if his_for_short_gru:
-            for data in his_for_short_gru:
-                short_term_context = self.short_term_encoder(data, short_term_context)
+        # short_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
+        short_term_context = self.short_term_encoder(his_for_short_gru)
 
         # --- 3. 融合上下文 ---
         delay_emb = self.delay_embedding(delay.long())
@@ -276,6 +272,20 @@ class ConvGRUCell(nn.Module):
         h_next = (1 - update_gate) * h_cur + update_gate * cc_can
         return h_next
 
+class ConvGRU(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size):
+        super(ConvGRU, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.cell = ConvGRUCell(input_dim, hidden_dim, kernel_size)
+
+    def forward(self, input_sequence, hidden_state=None):
+        b, c, h, w = input_sequence[0].shape
+        if hidden_state is None:
+            hidden_state = torch.zeros(b, self.hidden_dim, h, w, device=input_sequence[0].device)
+        # 循环处理序列中的每一个时间步
+        for input_tensor in input_sequence:
+            hidden_state = self.cell(input_tensor, hidden_state)
+        return hidden_state
 
 class HierarchicalMotionPredictor(nn.Module):
     def __init__(self, args_mgdc_bev):
