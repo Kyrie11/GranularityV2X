@@ -257,7 +257,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         long_his_vox = his_vox[delay_steps::self.long_gaps]
         long_his_feat = his_feat[delay_steps::self.long_gaps]
         long_his_det = his_det[delay_steps::self.long_gaps]
-
+        print("long_his_vox[0].shape=",long_his_vox[0].shape=)
         num_short_frames = len(short_his_vox)
         num_long_frames = len(long_his_vox)
 
