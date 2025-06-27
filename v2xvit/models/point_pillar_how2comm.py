@@ -155,7 +155,7 @@ class PointPillarHow2comm(nn.Module):
         record_len = batch_dict['record_len']
         psm_single = self.cls_head(spatial_features_2d)
         # rm_single = self.reg_head(spatial_features_2d)
-        # print("spatial_feature_2d.shape=", spatial_features_2d.shape)
+        print("spatial_feature_2d.shape=", spatial_features_2d.shape)
         # print("spatial_feature.shape=", spatial_features.shape)
         # print("vox_bev.shape=",vox_bev.shape)
         # print("det_bev.shape=", det_bev.shape)
