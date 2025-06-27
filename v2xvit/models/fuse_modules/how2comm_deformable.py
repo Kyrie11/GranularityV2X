@@ -8,7 +8,7 @@ from torch import batch_norm, einsum
 from einops import rearrange, repeat
 from icecream import ic
 
-from v2xvit.models.comm_modules.communication import Communication
+from v2xvit.models.comm_modules.mutual_communication import AdvancedCommunication
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
 from v2xvit.models.sub_modules.mixed_feature_flow import MultiGranularityBevDelayCompensation
 from v2xvit.loss.flow_loss import CompensationLoss
@@ -32,7 +32,7 @@ class How2comm(nn.Module):
         #最终融合模块
         self.granularity_fusion = MultiGranularityFusionNet(args['granularity_trans'])
         # 通信模块
-        self.communication_net = Communication(c_vox=10, c_feat=64, c_det=10)
+        self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=10)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)

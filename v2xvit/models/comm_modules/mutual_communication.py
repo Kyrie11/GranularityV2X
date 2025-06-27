@@ -207,7 +207,7 @@ class UtilityNetwork(nn.Module):
 
 
 
-class Communication(nn.Module):
+class AdvancedCommunication(nn.Module):
     def __init__(self, c_vox, c_feat, c_det, c_semantic=32, lambda_rec=0.5):
         super(Communication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
