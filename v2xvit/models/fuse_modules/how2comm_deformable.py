@@ -151,7 +151,7 @@ class How2comm(nn.Module):
             det_bev = torch.cat(temp_det_list, dim=0)
             #稀疏多粒度数据传输
             if self.communication_flag:
-                vox_bev, feat_bev, det_bev, commu_loss = self.communication_net(temp_vox_list, temp_list, temp_det_list)
+                vox_bev, feat_bev, det_bev, commu_loss, commu_volume = self.communication_net(temp_vox_list, temp_list, temp_det_list)
 
                 # sparse_vox = all_agents_sparse_transmitted_data[:, 0:self.c_d, :, :]
                 # sparse_feat = all_agents_sparse_transmitted_data[:, self.c_d:self.c_d + self.c_f, :, :]
@@ -163,7 +163,7 @@ class How2comm(nn.Module):
                 # det_bev = F.interpolate(sparse_det, scale_factor=1, mode="bilinear", align_corners=False)
                 # det_bev = self.channel_fuse(det_bev)
             else:
-                communication_rates = torch.tensor(0).to(feat_bev.device)
+                commu_volume = 0
                 commu_loss = torch.zeros(1).to(feat_bev.device)
 
             batch_node_feat = self.regroup(feat_bev, record_len)
@@ -183,4 +183,4 @@ class How2comm(nn.Module):
             fused_feat_list = torch.stack(fused_feat_list)
 
                 
-        return fused_feat_list, communication_rates, offset_loss, commu_loss
+        return fused_feat_list, commu_volume, offset_loss, commu_loss

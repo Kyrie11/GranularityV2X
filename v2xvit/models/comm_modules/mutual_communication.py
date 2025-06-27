@@ -279,18 +279,22 @@ class Communication(nn.Module):
     def forward(self, vox_list,feat_list,det_list):
         sparse_vox_out, sparse_feat_out, sparse_det_out = [], [], []
         total_loss = []
+        total_communication_volume = []
         for i in range(len(feat_list)):
             utility_loss = None
             reconstruction_loss = None
             vox_i, feat_i, det_i = vox_list[i], feat_list[i], det_list[i]
-            num_agents, _, H, W = feat_i.shape
+
+            num_agents, c_vox, H, W = vox_i.shape
+            c_feat = feat_i.shape[1]
+            c_det = det_i.shape[1]
 
             if num_agents <= 1:
                 # If no collaborators, append empty tensors to maintain output structure
                 device = feat_i.device
-                sparse_vox_out.append(torch.empty(0, self.c_vox, H, W, device=device))
-                sparse_feat_out.append(torch.empty(0, self.c_feat, H, W, device=device))
-                sparse_det_out.append(torch.empty(0, self.c_det, H, W, device=device))
+                sparse_vox_out.append(torch.empty(0, c_vox, H, W, device=device))
+                sparse_feat_out.append(torch.empty(0, c_feat, H, W, device=device))
+                sparse_det_out.append(torch.empty(0, c_det, H, W, device=device))
                 continue
 
             # 1. Separate Ego from Collaborators
@@ -298,6 +302,16 @@ class Communication(nn.Module):
             ego_feat, collab_feat = feat_i[0:1], feat_i[1:]
             ego_det, collab_det = det_i[0:1], det_i[1:]
             num_collaborators = collab_vox.shape[0]
+
+            #计算带宽上限
+            max_possible_volume = H * W * num_collaborators * (c_vox+c_feat+c_det)
+            min_budget = int(0.05 * max_possible_volume)
+            max_budget = int(0.80 * max_possible_volume)
+            min_budget = max(min_budget, torch.max(self.cost_vector).item())
+            if min_budget >= max_budget:
+                current_budget = max_budget
+            else:
+                current_budget = torch.randint(low=min_budget, high=max_budget + 1, size=(1,)).item()
 
             # 2. Generate Attention Maps (The "Common Language")
             ego_attn_spatial, ego_attn_granularity, ego_attn_semantic = self.attention_generator(ego_vox, ego_feat,
@@ -326,15 +340,23 @@ class Communication(nn.Module):
             predicted_utility = self.utility_network(fused_input)
 
             # 5. Compute Loss (only during training)
-            if self.training:
-                # Use privileged information to calculate the "perfect" GT
-                utility_gt = self._calculate_marginal_utility_gt(
-                    (ego_vox, ego_feat, ego_det),
-                    (collab_vox, collab_feat, collab_det),
-                    (ego_req_spatial, ego_req_granularity, ego_attn_semantic),
-                    collab_attn_semantic
-                )
-                utility_loss = F.mse_loss(predicted_utility, utility_gt)
+            # if self.training:
+            #     # Use privileged information to calculate the "perfect" GT
+            #     utility_gt = self._calculate_marginal_utility_gt(
+            #         (ego_vox, ego_feat, ego_det),
+            #         (collab_vox, collab_feat, collab_det),
+            #         (ego_req_spatial, ego_req_granularity, ego_attn_semantic),
+            #         collab_attn_semantic
+            #     )
+            #     utility_loss = F.mse_loss(predicted_utility, utility_gt)
+
+            utility_gt = self._calculate_marginal_utility_gt(
+                (ego_vox, ego_feat, ego_det),
+                (collab_vox, collab_feat, collab_det),
+                (ego_req_spatial, ego_req_granularity, ego_attn_semantic),
+                collab_attn_semantic
+            )
+            utility_loss = F.mse_loss(predicted_utility, utility_gt)
 
             # 6. Top-K Selection based on Predicted Utility and Budget
             final_utility = predicted_utility
@@ -354,7 +376,7 @@ class Communication(nn.Module):
 
             for idx in sorted_indices:
                 cost = flat_costs[idx]
-                if bandwidth_accumulator + cost > self.bandwidth_budget:
+                if bandwidth_accumulator + cost > current_budget:
                     continue
 
                 bandwidth_accumulator += cost
@@ -369,24 +391,42 @@ class Communication(nn.Module):
             sparse_det_i = collab_det * transmission_mask[:, 2:3, :, :]
 
 
-            if self.training:
-                num_collaborators = collab_vox.shape[0]
-                # Ego's BEVs need to be broadcasted to match the number of collaborators
-                ego_vox_b = ego_vox.expand(num_collaborators, -1, -1, -1)
-                ego_feat_b = ego_feat.expand(num_collaborators, -1, -1, -1)
-                ego_det_b = ego_det.expand(num_collaborators, -1, -1, -1)
+            # if self.training:
+            #     num_collaborators = collab_vox.shape[0]
+            #     # Ego's BEVs need to be broadcasted to match the number of collaborators
+            #     ego_vox_b = ego_vox.expand(num_collaborators, -1, -1, -1)
+            #     ego_feat_b = ego_feat.expand(num_collaborators, -1, -1, -1)
+            #     ego_det_b = ego_det.expand(num_collaborators, -1, -1, -1)
+            #
+            #     # Reconstruct each granularity
+            #     recon_vox = self.decoder_vox(ego_vox_b, sparse_vox_i)
+            #     recon_feat = self.decoder_feat(ego_feat_b, sparse_feat_i)
+            #     recon_det = self.decoder_det(ego_det_b, sparse_det_i)
+            #
+            #     # Calculate loss against the ORIGINAL collaborator BEVs
+            #     loss_vox = self.reconstruction_loss_fn(recon_vox, collab_vox)
+            #     loss_feat = self.reconstruction_loss_fn(recon_feat, collab_feat)
+            #     loss_det = self.reconstruction_loss_fn(recon_det, collab_det)
+            #
+            #     reconstruction_loss = loss_vox + loss_feat + loss_det
 
-                # Reconstruct each granularity
-                recon_vox = self.decoder_vox(ego_vox_b, sparse_vox_i)
-                recon_feat = self.decoder_feat(ego_feat_b, sparse_feat_i)
-                recon_det = self.decoder_det(ego_det_b, sparse_det_i)
+            num_collaborators = collab_vox.shape[0]
+            # Ego's BEVs need to be broadcasted to match the number of collaborators
+            ego_vox_b = ego_vox.expand(num_collaborators, -1, -1, -1)
+            ego_feat_b = ego_feat.expand(num_collaborators, -1, -1, -1)
+            ego_det_b = ego_det.expand(num_collaborators, -1, -1, -1)
 
-                # Calculate loss against the ORIGINAL collaborator BEVs
-                loss_vox = self.reconstruction_loss_fn(recon_vox, collab_vox)
-                loss_feat = self.reconstruction_loss_fn(recon_feat, collab_feat)
-                loss_det = self.reconstruction_loss_fn(recon_det, collab_det)
+            # Reconstruct each granularity
+            recon_vox = self.decoder_vox(ego_vox_b, sparse_vox_i)
+            recon_feat = self.decoder_feat(ego_feat_b, sparse_feat_i)
+            recon_det = self.decoder_det(ego_det_b, sparse_det_i)
 
-                reconstruction_loss = loss_vox + loss_feat + loss_det
+            # Calculate loss against the ORIGINAL collaborator BEVs
+            loss_vox = self.reconstruction_loss_fn(recon_vox, collab_vox)
+            loss_feat = self.reconstruction_loss_fn(recon_feat, collab_feat)
+            loss_det = self.reconstruction_loss_fn(recon_det, collab_det)
+
+            reconstruction_loss = loss_vox + loss_feat + loss_det
 
             # 把ego的数据拼接回去
             sparse_vox_i = torch.cat((ego_vox, sparse_vox_i), dim=0)
@@ -397,17 +437,31 @@ class Communication(nn.Module):
             sparse_feat_out.append(sparse_feat_i)
             sparse_det_out.append(sparse_det_i)
 
-            if self.training:
-                utility_loss = utility_loss if utility_loss is not None else 0
-                reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
+            #计算通信量
+            cost_reshaped = self.cost_vector.view(1, 3, 1, 1)
+            volume_map = transmission_mask.float()*cost_reshaped
+            total_communication_volume += torch.sum(volume_map)
 
-                combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
-                total_loss.append(combined_loss)
+            # if self.training:
+            #     utility_loss = utility_loss if utility_loss is not None else 0
+            #     reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
+            #
+            #     combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
+            #     total_loss.append(combined_loss)
+            utility_loss = utility_loss if utility_loss is not None else 0
+            reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
+
+            combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
+            total_loss.append(combined_loss)
 
         # 8. Aggregate batch results and return
-        final_loss = torch.mean(torch.stack(total_loss)) if self.training and total_loss else None
+        # final_loss = torch.mean(torch.stack(total_loss)) if self.training and total_loss else None
+        final_loss = torch.mean(torch.stack(total_loss))
+
+        mean_communication_volume = total_communication_volume/len(vox_list)
 
         return (torch.cat(sparse_vox_out, dim=0),
                 torch.cat(sparse_feat_out, dim=0),
                 torch.cat(sparse_det_out, dim=0),
-                final_loss)
+                final_loss,
+                mean_communication_volume)

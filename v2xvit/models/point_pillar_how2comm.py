@@ -179,6 +179,7 @@ class PointPillarHow2comm(nn.Module):
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
+        print("fused_feature.shape=", fused_feature.shape)
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
 
