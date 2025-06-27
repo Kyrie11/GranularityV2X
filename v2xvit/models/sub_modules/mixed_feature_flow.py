@@ -264,6 +264,7 @@ class MultiGranularityBevDelayCompensation(nn.Module):
         #将每个时间步的三个粒度特征拼接在一起
         short_his_cat_tensors = [torch.cat([short_his_vox[i], short_his_feat[i], short_his_det[i]], dim=1) for i in range(num_short_frames)]
         long_his_cat_tensors = [torch.cat([long_his_vox[i], long_his_feat[i], long_his_det[i]], dim=1) for i in range(num_long_frames)]
+        print("long_his_cat_tensors[0].shape=", long_his_cat_tensors[0].shape)
 
         delay_tensor = torch.full((B,), delay_steps, dtype=torch.long, device=his_vox[0].device)
         #进行运动预测
