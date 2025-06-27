@@ -212,10 +212,7 @@ class AdvancedCommunication(nn.Module):
         super(AdvancedCommunication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
         #效益网络
-        self.utility_net =UtilityNetwork(collab_bev_channels=90,
-            granularity_coeff_dim=3,  # X_C 的维度
-            semantic_coeff_dim=c_semantic, # X_G 的维度
-            bandwidth_vector_dim=3)
+        self.utility_net =UtilityNetwork(c_semantic)
 
         # 注册成本向量为buffer
         self.register_buffer('cost_vector', torch.tensor([c_vox, c_feat, c_det], dtype=torch.float32))
