@@ -93,8 +93,8 @@ class ContextFusionMotionPredictor(nn.Module):
         delay_emb_dim = args.get("delay_dim", 32)
         self.max_delay = args.get("max_delay", 6)
 
-        self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
-        self.short_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3), padding=1)
+        self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
+        self.short_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
         self.delay_embedding = nn.Embedding(self.max_delay + 1, delay_emb_dim)
 
         fusion_input_channels = gru_hidden_channels * 2 + delay_emb_dim
