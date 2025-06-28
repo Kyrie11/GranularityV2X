@@ -89,29 +89,30 @@ class ContextFusionMotionPredictor(nn.Module):
         c_feat = args.get("C_F")
         c_det = args.get("C_D")
         in_channels = c_vox + c_feat + c_det
-        gru_hidden_channels = args.get("gru_dim", 32)
+        self.gru_hidden_channels = args.get("gru_dim", 32)
         delay_emb_dim = args.get("delay_dim", 16)
         self.max_delay = args.get("max_delay", 6)
 
-        self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
-        self.short_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
+        self.long_term_encoder = ConvGRU(in_channels, self.gru_hidden_channels, kernel_size=(3, 3))
+        self.short_term_encoder = ConvGRU(in_channels, self.gru_hidden_channels, kernel_size=(3, 3))
         self.delay_embedding = nn.Embedding(self.max_delay + 1, delay_emb_dim)
 
-        fusion_input_channels = gru_hidden_channels * 2 + delay_emb_dim
+        fusion_input_channels = self.gru_hidden_channels * 2 + delay_emb_dim
         self.context_fusion_net = nn.Sequential(
-            nn.Conv2d(fusion_input_channels, gru_hidden_channels, kernel_size=3, padding=1),
+            nn.Conv2d(fusion_input_channels, self.gru_hidden_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(gru_hidden_channels, gru_hidden_channels, kernel_size=1)
+            nn.Conv2d(self.gru_hidden_channels, self.gru_hidden_channels, kernel_size=1)
         )
 
-        self.final_flow_predictor = SingleInputFlowPredictor(in_channels=gru_hidden_channels)
+        self.final_flow_predictor = SingleInputFlowPredictor(in_channels=self.gru_hidden_channels)
         self.warping_layer = WarpingLayer()
         self.refinement_net = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
 
     def forward(self,vox_list, feat_list, det_list):
-        delay = random.randint(0, self.max_delay)
+        delay = random.randint(0, min(self.max_delay, len(vox_list)))
 
         fused_his = [torch.cat([vox_list[i], feat_list[i], det_list[i]], dim=1) for i in range(len(vox_list))]
+
 
         #我们要时延预测的帧
         fused_to_compensate = fused_his[delay]
@@ -138,18 +139,37 @@ class ContextFusionMotionPredictor(nn.Module):
         long_term_his_fused = fused_his_sequence[::self.long_interval]
 
         #远近时间倒排序
-        his_for_short_gru = short_term_his_fused[::-1]
-        his_for_long_gru = long_term_his_fused[::-1]
+        if len(short_term_his_fused) > 0:
+            his_for_short_gru = short_term_his_fused[::-1]
+        else:
+            his_for_short_gru = None
+        if len(long_term_his_fused) > 0:
+            his_for_long_gru = long_term_his_fused[::-1]
+        else:
+            his_for_long_gru = None
 
         # ---  编码长短期上下文 ---
 
+        if his_for_short_gru is None and his_for_long_gru is None:
+            # 没有历史信息，无法进行运动预测，直接返回
+            return None, None, None
         # 长期上下文
         # long_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
-        long_term_context = self.long_term_encoder(his_for_long_gru)
+        if his_for_long_gru is not None:
+            long_term_context = self.long_term_encoder(his_for_long_gru)
+        else:
+            long_term_context = torch.zeros(B, self.gru_hidden_channels, H, W,
+                                            device=fused_to_compensate.device,
+                                            dtype=fused_to_compensate.dtype)
 
         # 短期上下文
         # short_term_context = self.init_hidden(B, (H, W), device, gru_hidden_channels)
-        short_term_context = self.short_term_encoder(his_for_short_gru)
+        if his_for_short_gru is not None:
+            short_term_context = self.short_term_encoder(his_for_short_gru)
+        else:
+            short_term_context = torch.zeros(B, self.gru_hidden_channels, H, W,
+                                            device=fused_to_compensate.device,
+                                            dtype=fused_to_compensate.dtype)
 
         # --- 3. 融合上下文 ---
         delay_tensor = torch.full((B,), delay, dtype=torch.long)
