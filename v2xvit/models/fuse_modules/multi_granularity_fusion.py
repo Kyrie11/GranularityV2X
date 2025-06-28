@@ -32,7 +32,7 @@ class AgentSelfEnhancement(nn.Module):
     """
 
     def __init__(self,
-                 d_model: int = 256,
+                 d_model: int = 64,
                  num_history_frames: int = 3,
                  nhead_transformer: int = 8,
                  num_transformer_layers: int = 2):
