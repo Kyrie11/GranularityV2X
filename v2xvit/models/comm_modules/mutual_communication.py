@@ -302,9 +302,9 @@ class AdvancedCommunication(nn.Module):
             if num_agents <= 1:
                 # If no collaborators, append empty tensors to maintain output structure
                 device = feat_i.device
-                sparse_vox_out.append(torch.empty(0, c_vox, H, W, device=device))
-                sparse_feat_out.append(torch.empty(0, c_feat, H, W, device=device))
-                sparse_det_out.append(torch.empty(0, c_det, H, W, device=device))
+                sparse_vox_out.append(vox_i)
+                sparse_feat_out.append(feat_i)
+                sparse_det_out.append(det_i)
                 total_loss.append(torch.tensor(0, dtype=torch.float))
                 continue
 
