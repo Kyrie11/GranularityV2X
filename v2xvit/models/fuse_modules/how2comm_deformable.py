@@ -112,6 +112,8 @@ class How2comm(nn.Module):
         feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
 
         fused_feat_list = []
+        commu_volume = 0
+        commu_loss = torch.tensor(0).to(feat_bev.device)
         #先不考虑multi_scale
         if self.communication:
             batch_confidence_maps = self.regroup(psm, record_len)
@@ -169,8 +171,8 @@ class How2comm(nn.Module):
                 # det_bev = F.interpolate(sparse_det, scale_factor=1, mode="bilinear", align_corners=False)
                 # det_bev = self.channel_fuse(det_bev)
             else:
-                commu_volume = 0
-                commu_loss = torch.zeros(1).to(feat_bev.device)
+                commu_volume = torch.tensor(0).to(feat_bev.device)
+                commu_loss = torch.zeros(0).to(feat_bev.device)
 
             batch_node_feat = self.regroup(feat_bev, record_len)
             batch_node_vox = self.regroup(vox_bev, record_len)
