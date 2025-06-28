@@ -29,7 +29,7 @@ class How2comm(nn.Module):
         #时延补偿损失
         self.compensation_criterion = CompensationLoss(args['mgdc_bev_args'])
         #ego增强模块
-        self.ego_enhance_model = AgentSelfEnhancement(d_model=256, num_history_frames=3, nhead_transformer=8, num_transformer_layers=2)
+        self.ego_enhance_model = AgentSelfEnhancement(d_model=64, num_history_frames=3, nhead_transformer=8, num_transformer_layers=2)
         #最终融合模块
         self.granularity_fusion = MultiGranularityFusionNet(args['granularity_trans'])
         # 通信模块
