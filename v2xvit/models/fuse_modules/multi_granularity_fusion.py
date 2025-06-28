@@ -262,6 +262,8 @@ class MultiGranularityFusionNet(nn.Module):
         # --- 1. 数据分离：从输入张量中分离出Ego和Collaborators ---
         num_agents = vox_bev.shape[0]
 
+
+
         # Ego-agent的数据 (取第0个元素，并用[0:1]保持维度)
         # 核心假设：feat_bev[0]是已经过AgentSelfEnhancement模块增强的特征
         ego_vox = vox_bev[0:1]
@@ -274,6 +276,7 @@ class MultiGranularityFusionNet(nn.Module):
         if num_agents <= 1:
             # 如果没有协作agent，则直接使用ego自身的特征
             final_feature = self.final_fusion_layer(ego_encoded_feat)
+            print("当只有一个agent时，final_feature.shape=", final_feature.shape)
             return final_feature
 
         # Collaborator agents的数据

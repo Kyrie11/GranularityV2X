@@ -108,7 +108,7 @@ class ContextFusionMotionPredictor(nn.Module):
         self.warping_layer = WarpingLayer()
         self.refinement_net = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
 
-    def forward(self,vox_list, feat_list, det_list):
+    def forward(self,vox_list, feat_list, det_list, record_len):
         delay = random.randint(0, min(self.max_delay, len(vox_list)))
 
         fused_his = [torch.cat([vox_list[i], feat_list[i], det_list[i]], dim=1) for i in range(len(vox_list))]
