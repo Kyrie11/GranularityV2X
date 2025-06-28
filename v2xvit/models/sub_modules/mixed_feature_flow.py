@@ -153,6 +153,7 @@ class ContextFusionMotionPredictor(nn.Module):
         delay = torch.tensor(delay, dtype=torch.long)
         delay = delay.unsqueeze(0)
         delay = torch.tensor(delay * B, dtype=torch.long)
+        print("delay.shape=", delay.shape)
         delay_emb = self.delay_embedding(delay)
         print("delay_emb.shape=", delay_emb.shape)
         delay_map = delay_emb.view(B, -1, 1, 1).expand(B, -1, H, W)
