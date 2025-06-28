@@ -111,6 +111,7 @@ class How2comm(nn.Module):
         # 对ego的帧进行增强
         feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
 
+        fused_feat_list = []
         #先不考虑multi_scale
         if self.communication:
             batch_confidence_maps = self.regroup(psm, record_len)
@@ -176,7 +177,7 @@ class How2comm(nn.Module):
             batch_node_det = self.regroup(det_bev, record_len)
             # batch_node_features_his = self.regroup(his, record_len)
 
-            fused_feat_list = []
+
             for b in range(B):
                 N = record_len[b]
                 # 这里已经是稀疏化的数据
