@@ -117,7 +117,7 @@ class How2comm(nn.Module):
         #先不考虑multi_scale
         if self.communication:
             batch_confidence_maps = self.regroup(psm, record_len)
-            _, _, confidence_maps = self.naive_communication(batch_confidence_maps)
+            # _, _, confidence_maps = self.naive_communication(batch_confidence_maps)
 
             batch_temp_features = self.regroup(feat_bev, record_len)
             batch_vox_features = self.regroup(vox_bev, record_len)
