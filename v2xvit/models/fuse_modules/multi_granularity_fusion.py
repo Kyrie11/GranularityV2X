@@ -170,29 +170,29 @@ class TokenCrossAttention(nn.Module):
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
+        self.attention = nn.MultiheadAttention(embed_dim=d_model,
+                                               num_heads=n_heads,
+                                               batch_first=True)
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, ego_feat_map: torch.Tensor, collab_feat_map: torch.Tensor) -> torch.Tensor:
         B, C, H, W = ego_feat_map.shape
         ego_seq = ego_feat_map.flatten(2).permute(0, 2, 1)
-        print("ego_seq.shape=", ego_seq.shape)
         collab_seq = collab_feat_map.flatten(2).permute(0, 2, 1)
-        print("collab_seq.shape=", collab_seq.shape)
-        q = self.q_proj(ego_seq)
-        k = self.k_proj(collab_seq)
-        v = self.v_proj(collab_seq)
-        q_global = q.mean(dim=1, keepdim=True).permute(1, 0, 2)
-        k = k.permute(1, 0, 2)
-        v = v.permute(1, 0, 2)
-        attn_output, _ = F.multi_head_attention_forward(
-            query=q_global, key=k, value=v, embed_dim_to_check=C,
-            num_heads=self.n_heads, in_proj_weight=torch.empty(0), in_proj_bias=None,
-            bias_k=None, bias_v=None, add_zero_attn=False, dropout_p=0.1,
-            out_proj_weight=self.out_proj.weight, out_proj_bias=self.out_proj.bias,
-            training=self.training)
-        h_m = attn_output.squeeze(0)
-        h_m = self.norm(h_m)
-        return h_m
+        # 2. 【核心修改】创建全局 Ego 查询
+        # q 的形状是 [B_ego, H*W, C]，我们只取 ego (B_ego=1)
+        # .mean(dim=1, keepdim=True) -> [1, 1, C]
+        q_global = ego_seq.mean(dim=1, keepdim=True)
+        attn_output, _ = self.attention(query=q_global,
+                                        key=collab_seq,
+                                        value=collab_seq)
+
+        fused_global_feat = attn_output.permute(0, 2, 1).view(1, C, 1, 1)
+
+        # .expand(...) 将其广播到原始地图大小
+        fused_map = fused_global_feat.expand(-1, -1, H, W)
+
+        return fused_map
 
 
 class TokenBevDecoder(nn.Module):
