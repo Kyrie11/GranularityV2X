@@ -187,7 +187,7 @@ class How2comm(nn.Module):
                 node_det = batch_node_det[b]
                 fused_feat = self.granularity_fusion(node_vox, node_feat, node_det)
                 fused_feat_list.append(fused_feat)
-            fused_feat_list = torch.stack(fused_feat_list)
+            fused_feat = torch.cat(fused_feat_list, dim=0)
 
                 
-        return fused_feat_list, commu_volume, offset_loss, commu_loss
+        return fused_feat, commu_volume, offset_loss, commu_loss
