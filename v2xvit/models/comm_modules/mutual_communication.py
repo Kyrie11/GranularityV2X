@@ -234,6 +234,15 @@ class AdvancedCommunication(nn.Module):
         # Using L1 Loss is often better for image-to-image tasks as it's less blurry
         self.reconstruction_loss_fn = nn.L1Loss()
 
+    def unravel_index_single(self, flat_index, shape):
+        coords = []
+        # 我们需要从内向外计算，所以反转形状
+        for dim in reversed(shape):
+            coords.append(flat_index % dim)
+            flat_index = flat_index // dim
+        # 因为是从内向外计算的，所以结果列表也需要反转
+        return tuple(coords[::-1])
+
     def _calculate_marginal_utility_gt(self, ego_bevs, collab_bevs, ego_requests, collab_semantic_attn) -> torch.Tensor:
         """Calculates the ideal 'marginal utility' GT using privileged information."""
         """Calculates the ideal 'marginal utility' GT using privileged information."""
@@ -388,7 +397,7 @@ class AdvancedCommunication(nn.Module):
 
                 bandwidth_accumulator += cost
                 # Convert flat index back to multi-dimensional coordinates
-                coords = torch.unravel_index(idx, best_utility_per_patch.shape)
+                coords = self.unravel_index_single(idx.item(), best_utility_per_patch.shape)
                 collab_idx, h_idx, w_idx = coords
                 granularity_to_transmit = best_granularity_idx[coords]
                 transmission_mask[collab_idx, granularity_to_transmit, h_idx, w_idx] = True
