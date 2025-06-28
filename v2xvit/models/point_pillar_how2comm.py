@@ -185,8 +185,8 @@ class PointPillarHow2comm(nn.Module):
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
                 bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         print("fused_feat_list.shape=",fused_feature.shape)
-        if self.shrink_flag:
-            fused_feature = self.shrink_conv(fused_feature)
+        # if self.shrink_flag:
+        #     fused_feature = self.shrink_conv(fused_feature)
 
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
