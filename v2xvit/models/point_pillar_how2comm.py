@@ -176,14 +176,14 @@ class PointPillarHow2comm(nn.Module):
         c_feat = feat_bev.shape[1]
         c_det = det_bev.shape[1]
 
-        fused_his = [his_vox, his_feat, his_det]
+        # fused_his = [his_vox, his_feat, his_det]
 
         if self.delay == 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
                 fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone)
         elif self.delay > 0:
             fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,history=fused_his)
+                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 

@@ -65,7 +65,7 @@ class How2comm(nn.Module):
             # updated_curr_bev[flat_idx] = enhanced_feature_i
         return torch.cat(curr_bev_batch, dim=0)
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, history=None):
+    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, his_vox=None, his_feat=None, his_det=None):
         vox_bev, feat_bev, det_bev = bev_list
         _, _, H, W = feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
@@ -82,9 +82,9 @@ class How2comm(nn.Module):
 
         c_vox = vox_bev.shape[1]
         c_feat = feat_bev.shape[1]
-        if history:
+        if his_vox:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_F_fused, _, _ = self.mgdc_bev_compensator(history)
+            comp_F_fused, _, _ = self.mgdc_bev_compensator(his_vox, his_feat, his_det)
             comp_F_vox = comp_F_fused[:,0:c_vox,:,:]
             comp_F_feat = comp_F_fused[:,c_vox:c_vox+c_feat,:,:]
             comp_F_det = comp_F_fused[:,c_vox+c_feat:,:,:]
