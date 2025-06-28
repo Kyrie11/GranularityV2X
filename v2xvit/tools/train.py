@@ -181,7 +181,7 @@ def main():
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
-                    final_loss += ouput_dict["offset_loss"][0] + ouput_dict["commu_loss"][0]
+                    final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)
             time.sleep(0.001)
