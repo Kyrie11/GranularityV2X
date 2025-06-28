@@ -90,7 +90,7 @@ class ContextFusionMotionPredictor(nn.Module):
         c_det = args.get("C_D")
         in_channels = c_vox + c_feat + c_det
         gru_hidden_channels = args.get("gru_dim", 32)
-        delay_emb_dim = args.get("delay_dim", 8)
+        delay_emb_dim = args.get("delay_dim", 32)
         self.max_delay = args.get("max_delay", 6)
 
         self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
