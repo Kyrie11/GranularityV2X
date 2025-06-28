@@ -468,6 +468,7 @@ class AdvancedCommunication(nn.Module):
             reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
 
             combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
+            print("combined_loss=", combined_loss)
             total_loss.append(combined_loss)
 
         # 8. Aggregate batch results and return
