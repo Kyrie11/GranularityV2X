@@ -289,7 +289,7 @@ class AdvancedCommunication(nn.Module):
     def forward(self, vox_list,feat_list,det_list):
         sparse_vox_out, sparse_feat_out, sparse_det_out = [], [], []
         total_loss = []
-        total_communication_volume = torch.tensor(0)
+        total_communication_volume = torch.tensor(0, dtype=torch.float)
         for i in range(len(feat_list)):
             utility_loss = None
             reconstruction_loss = None
@@ -455,7 +455,7 @@ class AdvancedCommunication(nn.Module):
 
             #计算通信量
             cost_reshaped = self.cost_vector.view(1, 3, 1, 1)
-            volume_map = transmission_mask.float()*cost_reshaped
+            volume_map = torch.tensor(transmission_mask.float()*cost_reshaped, dtype=torch.float)
             total_communication_volume += torch.sum(volume_map)
 
             # if self.training:
