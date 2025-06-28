@@ -111,6 +111,7 @@ class How2comm(nn.Module):
         feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
 
         fused_feat_list = []
+        fused_feat = torch.tensor(0).to(feat_bev.device)
         commu_volume = 0
         commu_loss = torch.tensor(0).to(feat_bev.device)
         #先不考虑multi_scale
