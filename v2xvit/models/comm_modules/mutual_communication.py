@@ -330,7 +330,13 @@ class AdvancedCommunication(nn.Module):
             ego_req_s_b = ego_req_spatial.expand(num_collaborators, -1, -1, -1)
             ego_req_g_b = ego_req_granularity.expand(num_collaborators, -1, -1, -1)
             ego_req_sem_b = ego_attn_semantic.expand(num_collaborators, -1, -1, -1)
-
+            print("————————检测维度——————")
+            print("ego_req_s_b.shape=",ego_req_s_b.shape)
+            print("ego_req_g_b.shape=",ego_req_g_b.shape)
+            print("ego_req_sem_b.shape=",ego_req_sem_b.shape)
+            print("collab_attn_spatial.shape=",collab_attn_spatial.shape)
+            print("collab_attn_granularity.shape=",collab_attn_granularity.shape)
+            print("collab_attn_semantic.shape=",collab_attn_semantic.shape)
             # Fuse all available information at inference time
             fused_input = torch.cat([
                 ego_req_s_b, ego_req_g_b, ego_req_sem_b,
