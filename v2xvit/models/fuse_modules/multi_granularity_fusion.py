@@ -214,6 +214,7 @@ class TokenBevDecoder(nn.Module):
 
     def forward(self, h_m: torch.Tensor) -> torch.Tensor:
         x = h_m.unsqueeze(-1).unsqueeze(-1)
+        print("x.shape=", x.shape)
         x = x.repeat(1, 1, self.h, self.w)
         H_fused_content = self.decoder(x)
         return H_fused_content
@@ -307,7 +308,7 @@ class MultiGranularityFusionNet(nn.Module):
 
         # --- 3. 聚合所有协作令牌并解码 ---
         # 将令牌列表堆叠成 [Num_collab, 1, C], 然后求和/平均
-        fused_token = torch.stack(collaborator_tokens).sum(dim=0)  # [1, C]
+            fused_token = torch.stack(collaborator_tokens).sum(dim=0)  # [1, C]
 
         # 将聚合后的令牌解码为BEV特征图 H_fused_content
         H_fused_content = self.token_decoder(fused_token)
