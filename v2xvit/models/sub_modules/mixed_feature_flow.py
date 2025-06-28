@@ -150,9 +150,9 @@ class ContextFusionMotionPredictor(nn.Module):
         short_term_context = self.short_term_encoder(his_for_short_gru)
 
         # --- 3. 融合上下文 ---
+        delay = [delay] * B
         delay = torch.tensor(delay, dtype=torch.long)
-        delay = delay.unsqueeze(0)
-        delay = delay * B
+
         print("delay.shape=", delay.shape)
         delay_emb = self.delay_embedding(delay)
         print("delay_emb.shape=", delay_emb.shape)
