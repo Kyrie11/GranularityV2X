@@ -109,7 +109,7 @@ class How2comm(nn.Module):
         #把增强后的ego特征放入
         his_feat = history[1]  # list of [B,C,H,W]
         # 对ego的帧进行增强
-        feat_bev = self.get_enhanced_feature(feat_bev, his_feat[0:4], record_len)  # 取第1到第3帧作为历史
+        feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
 
         #先不考虑multi_scale
         if self.communication:
