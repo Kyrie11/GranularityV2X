@@ -313,7 +313,7 @@ class MultiGranularityFusionNet(nn.Module):
 
         # --- 4. 最终融合 ---
         # 与Ego-agent的原始增强特征进行最终融合 (残差连接)
-        final_feature = ego_feat + H_fused_content
+        final_feature = ego_encoded_feat + H_fused_content
         final_feature = self.final_fusion_layer(final_feature)
 
         return final_feature
