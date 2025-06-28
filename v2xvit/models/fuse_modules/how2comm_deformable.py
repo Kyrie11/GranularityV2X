@@ -18,7 +18,7 @@ from v2xvit.models.fuse_modules.multi_granularity_fusion import AgentSelfEnhance
 class How2comm(nn.Module):
     def __init__(self, args, args_pre):
         super(How2comm, self).__init__()
-        self.communication = False
+        self.communication = True
         self.communication_flag = args['communication_flag']
         self.downsample_rate = args['downsample_rate']
         self.async_flag = False
