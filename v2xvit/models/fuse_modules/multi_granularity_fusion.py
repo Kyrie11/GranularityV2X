@@ -293,6 +293,8 @@ class MultiGranularityFusionNet(nn.Module):
 
             # 2b. 将其编码为统一特征图
             unified_collab_feat = self.granularity_encoder(sparse_granu_i)
+            print("unified_collab_feat.shape=", unified_collab_feat.shape)
+            print("ego_enhanced_feat.shape=", ego_enhanced_feat.shape)
 
             # 2c. 通过交叉注意力，计算匹配令牌 h_m
             # ego_enhanced_feat作为Query, unified_collab_feat作为Key和Value
