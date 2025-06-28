@@ -90,7 +90,7 @@ class ContextFusionMotionPredictor(nn.Module):
         c_det = args.get("C_D")
         in_channels = c_vox + c_feat + c_det
         gru_hidden_channels = args.get("gru_dim", 32)
-        delay_emb_dim = args.get("delay_dim", 32)
+        delay_emb_dim = args.get("delay_dim", 16)
         self.max_delay = args.get("max_delay", 6)
 
         self.long_term_encoder = ConvGRU(in_channels, gru_hidden_channels, kernel_size=(3, 3))
@@ -163,7 +163,7 @@ class ContextFusionMotionPredictor(nn.Module):
         # --- 4. 预测运动并外推 ---
         predicted_flow_at_delay, scale = self.final_flow_predictor(final_fused_context)
 
-        delay_expanded = delay.float().view(B, 1, 1, 1)
+        delay_expanded = torch.tensor(delay).float().view(B, 1, 1, 1)
         extrapolated_flow = predicted_flow_at_delay * delay_expanded
 
         # --- 5. 补偿与精炼 ---
