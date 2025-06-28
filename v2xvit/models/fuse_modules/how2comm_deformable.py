@@ -65,7 +65,7 @@ class How2comm(nn.Module):
             # updated_curr_bev[flat_idx] = enhanced_feature_i
         return torch.cat(curr_bev_batch, dim=0)
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, backbone=None, heads=None, history=None):
+    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, history=None):
         vox_bev, feat_bev, det_bev = bev_list
         _, _, H, W = feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
