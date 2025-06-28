@@ -213,10 +213,7 @@ class TokenBevDecoder(nn.Module):
             nn.ReLU(inplace=True))
 
     def forward(self, h_m: torch.Tensor) -> torch.Tensor:
-        print("h_m.shape=", h_m.shape)
         x = h_m.unsqueeze(-1).unsqueeze(-1)
-        print("x.shape=", x.shape)
-        x = x.repeat(1, 1, self.h, self.w)
         H_fused_content = self.decoder(x)
         return H_fused_content
 
