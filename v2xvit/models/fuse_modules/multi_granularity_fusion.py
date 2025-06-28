@@ -265,12 +265,16 @@ class MultiGranularityFusionNet(nn.Module):
 
         # Ego-agent的数据 (取第0个元素，并用[0:1]保持维度)
         # 核心假设：feat_bev[0]是已经过AgentSelfEnhancement模块增强的特征
-        ego_enhanced_feat = feat_bev[0:1]  # [1, C_feat, H, W]
+        ego_vox = vox_bev[0:1]
+        ego_feat = feat_bev[0:1]  # [1, C_feat, H, W]
+        ego_det = det_bev[0:1]
+        ego_granularity_cat = torch.cat([ego_vox, ego_feat, ego_det], dim=1)
+        ego_encoded_feat = self.granularity_encoder(ego_granularity_cat)
 
         # 检查是否存在协作agents
         if num_agents <= 1:
             # 如果没有协作agent，则直接使用ego自身的特征
-            final_feature = self.final_fusion_layer(ego_enhanced_feat)
+            final_feature = self.final_fusion_layer(ego_feat)
             return final_feature
 
         # Collaborator agents的数据
@@ -294,11 +298,11 @@ class MultiGranularityFusionNet(nn.Module):
             # 2b. 将其编码为统一特征图
             unified_collab_feat = self.granularity_encoder(sparse_granu_i)
             print("unified_collab_feat.shape=", unified_collab_feat.shape)
-            print("ego_enhanced_feat.shape=", ego_enhanced_feat.shape)
+            print("ego_enhanced_feat.shape=", ego_encoded_feat.shape)
 
             # 2c. 通过交叉注意力，计算匹配令牌 h_m
             # ego_enhanced_feat作为Query, unified_collab_feat作为Key和Value
-            h_m = self.token_attention(ego_enhanced_feat, unified_collab_feat)
+            h_m = self.token_attention(ego_encoded_feat, unified_collab_feat)
             collaborator_tokens.append(h_m)
 
         # --- 3. 聚合所有协作令牌并解码 ---
@@ -310,7 +314,7 @@ class MultiGranularityFusionNet(nn.Module):
 
         # --- 4. 最终融合 ---
         # 与Ego-agent的原始增强特征进行最终融合 (残差连接)
-        final_feature = ego_enhanced_feat + H_fused_content
+        final_feature = ego_feat + H_fused_content
         final_feature = self.final_fusion_layer(final_feature)
 
         return final_feature
