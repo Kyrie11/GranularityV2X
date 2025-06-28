@@ -456,6 +456,7 @@ class AdvancedCommunication(nn.Module):
             #计算通信量
             cost_reshaped = self.cost_vector.view(1, 3, 1, 1)
             volume_map = transmission_mask.float()*cost_reshaped
+            print("volume_map=", volume_map)
             total_communication_volume += torch.sum(volume_map)
 
             # if self.training:
