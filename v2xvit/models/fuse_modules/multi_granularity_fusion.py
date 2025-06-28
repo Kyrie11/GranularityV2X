@@ -277,6 +277,7 @@ class MultiGranularityFusionNet(nn.Module):
             # 如果没有协作agent，则直接使用ego自身的特征
             H_fused_content = torch.zeros_like(ego_encoded_feat)
             final_feature = self.final_fusion_layer(ego_encoded_feat+H_fused_content)
+            print("当只有一个agent时，ego_vox.shape=",ego_vox.shape)
             print("当只有一个agent时，ego_granularity_cat.shape=", ego_granularity_cat.shape)
             return final_feature
 
