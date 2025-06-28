@@ -64,6 +64,7 @@ class How2comm(nn.Module):
 
     def forward(self, bev_list, psm, record_len, pairwise_t_matrix, his_vox=None, his_feat=None, his_det=None):
         vox_bev, feat_bev, det_bev = bev_list
+        print("第一次检查feat_bev.shape=", feat_bev.shape)
         _, _, H, W = feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
@@ -104,10 +105,11 @@ class How2comm(nn.Module):
             feat_bev_copy = feat_bev.clone().detach()
             det_bev_copy = det_bev.clone().detach()
             offset_loss = torch.zeros(1).to(feat_bev.device)
-
+        print("第二次检查feat_bev.shape=", feat_bev_copy.shape)
         #把增强后的ego特征放入
         # 对ego的帧进行增强
         feat_bev_copy = self.get_enhanced_feature(feat_bev_copy, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
+        print("第三次检查feat_bev.shape=", feat_bev_copy.shape)
 
         fused_feat_list = []
         fused_feat = torch.tensor(0).to(feat_bev.device)
@@ -156,6 +158,7 @@ class How2comm(nn.Module):
             vox_bev_copy = torch.cat(temp_vox_list, dim=0)
             feat_bev_copy = torch.cat(temp_list, dim=0)
             det_bev_copy = torch.cat(temp_det_list, dim=0)
+            print("第四次检查feat_bev.shape=", feat_bev_copy.shape)
             #稀疏多粒度数据传输
             if self.communication_flag:
                 vox_bev_copy, feat_bev_copy, det_bev_copy, commu_loss, commu_volume = self.communication_net(temp_vox_list, temp_list, temp_det_list)
@@ -172,6 +175,7 @@ class How2comm(nn.Module):
             else:
                 commu_volume = torch.tensor(0).to(feat_bev.device)
                 commu_loss = torch.zeros(1).to(feat_bev.device)
+            print("第五次检查feat_bev.shape=", feat_bev_copy.shape)
 
             batch_node_feat = self.regroup(feat_bev_copy, record_len)
             batch_node_vox = self.regroup(vox_bev_copy, record_len)
