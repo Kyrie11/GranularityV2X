@@ -276,7 +276,7 @@ class MultiGranularityFusionNet(nn.Module):
         # 检查是否存在协作agents
         if num_agents <= 1:
             # 如果没有协作agent，则直接使用ego自身的特征
-            final_feature = self.final_fusion_layer(ego_feat)
+            final_feature = self.final_fusion_layer(ego_encoded_feat)
             return final_feature
 
         # Collaborator agents的数据
