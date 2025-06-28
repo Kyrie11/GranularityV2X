@@ -160,6 +160,10 @@ class AttentionGenerator(nn.Module):
             Tuple[Tensor, Tensor, Tensor]: 空间、粒度、语义Attention
         """
         # 准备空间attention的输入
+        print("检查维度-----")
+        print("vox_bev.shape=", vox_bev.shape)
+        print("feat_bev.shape=", feat_bev.shape)
+        print("det_bev.shape=", det_bev.shape)
         full_bev = torch.cat([vox_bev, feat_bev, det_bev], dim=1)
 
         # --- 计算空间Attention ---
