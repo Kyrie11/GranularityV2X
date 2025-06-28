@@ -79,7 +79,6 @@ class How2comm(nn.Module):
                                                          2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
 
-
         c_vox = vox_bev.shape[1]
         c_feat = feat_bev.shape[1]
         if his_vox:
