@@ -107,7 +107,6 @@ class How2comm(nn.Module):
             offset_loss = torch.zeros(1).to(feat_bev.device)
 
         #把增强后的ego特征放入
-        his_feat = history[1]  # list of [B,C,H,W]
         # 对ego的帧进行增强
         feat_bev = self.get_enhanced_feature(feat_bev, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
 
