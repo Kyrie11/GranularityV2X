@@ -129,8 +129,11 @@ class ContextFusionMotionPredictor(nn.Module):
         #提取delay后的帧作为历史
         fused_his_sequence = fused_his[delay+1:]
 
-        #分割长短期历史
-        short_term_his_fused = fused_his_sequence[:self.short_frames]
+        if self.short_frames <= len(fused_his_sequence):
+            #分割长短期历史
+            short_term_his_fused = fused_his_sequence[:self.short_frames]
+        else:
+            short_term_his_fused = fused_his_sequence
 
         long_term_his_fused = fused_his_sequence[::self.long_interval]
 

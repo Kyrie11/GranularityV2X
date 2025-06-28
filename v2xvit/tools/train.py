@@ -173,7 +173,7 @@ def main():
                 ouput_dict = model(batch_data_list)
                 final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
-                final_loss += ouput_dict["offset_loss"][0] + ouput_dict["commu_loss"][0]
+                final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
                     ouput_dict = model(batch_data_list)
