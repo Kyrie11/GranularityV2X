@@ -320,7 +320,7 @@ class AdvancedCommunication(nn.Module):
             collab_attn_spatial, collab_attn_granularity, collab_attn_semantic = self.attention_generator(collab_vox,
                                                                                                           collab_feat,
                                                                                                           collab_det)
-
+            collab_attn_granularity = collab_attn_granularity.expand(-1,-1,H,W)
             # Convert ego's self-attention into a "request" (1 - attention)
             ego_req_spatial = 1.0 - ego_attn_spatial
             ego_req_granularity = 1.0 - ego_attn_granularity
@@ -328,7 +328,7 @@ class AdvancedCommunication(nn.Module):
             # 3. Prepare Input for the UtilityNetwork
             # Broadcast ego's requests to match the number of collaborators for concatenation
             ego_req_s_b = ego_req_spatial.expand(num_collaborators, -1, -1, -1)
-            ego_req_g_b = ego_req_granularity.expand(num_collaborators, -1, -1, -1)
+            ego_req_g_b = ego_req_granularity.expand(num_collaborators, -1, H, W)
             ego_req_sem_b = ego_attn_semantic.expand(num_collaborators, -1, -1, -1)
             print("————————检测维度——————")
             print("ego_req_s_b.shape=",ego_req_s_b.shape)
