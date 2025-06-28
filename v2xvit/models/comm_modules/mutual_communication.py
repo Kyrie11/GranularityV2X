@@ -216,7 +216,7 @@ class AdvancedCommunication(nn.Module):
         super(AdvancedCommunication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
         #效益网络
-        self.utility_net =UtilityNetwork(c_semantic)
+        self.utility_network =UtilityNetwork(c_semantic)
 
         # 注册成本向量为buffer
         self.register_buffer('cost_vector', torch.tensor([c_vox, c_feat, c_det], dtype=torch.float32))
