@@ -234,7 +234,7 @@ class AdvancedCommunication(nn.Module):
         # Using L1 Loss is often better for image-to-image tasks as it's less blurry
         self.reconstruction_loss_fn = nn.L1Loss()
 
-    def _calculate_marginal_utility_gt(ego_bevs, collab_bevs, ego_requests, collab_semantic_attn) -> torch.Tensor:
+    def _calculate_marginal_utility_gt(self, ego_bevs, collab_bevs, ego_requests, collab_semantic_attn) -> torch.Tensor:
         """Calculates the ideal 'marginal utility' GT using privileged information."""
         """Calculates the ideal 'marginal utility' GT using privileged information."""
         ego_vox, ego_feat, ego_det = ego_bevs
