@@ -167,7 +167,7 @@ model:
         C_V: *C_V
         C_F: *C_F
         C_D: *C_D
-        d_model: 64
+        d_model: 256
         bev_h: 100
         bev_w: 352
 
