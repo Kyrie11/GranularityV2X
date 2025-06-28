@@ -179,15 +179,15 @@ class PointPillarHow2comm(nn.Module):
         # fused_his = [his_vox, his_feat, his_det]
 
         if self.delay == 0:
-            fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
                 bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
         elif self.delay > 0:
-            fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
                 bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+        print("fused_feat_list.shape=",fused_feature.shape)
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
-        print("fused_feature.shape=", fused_feature.shape)
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
 
@@ -195,8 +195,8 @@ class PointPillarHow2comm(nn.Module):
                        'rm': rm
                        }
 
-        output_dict.update(result_dict)
-        output_dict.update({'comm_rate': communication_rates,
+        # output_dict.update(result_dict)
+        output_dict.update({'comm_rate': commu_volume,
                             "offset_loss": offset_loss,
                             'commu_loss': commu_loss
                             })
