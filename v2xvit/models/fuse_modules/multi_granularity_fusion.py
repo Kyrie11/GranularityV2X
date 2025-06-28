@@ -175,7 +175,9 @@ class TokenCrossAttention(nn.Module):
     def forward(self, ego_feat_map: torch.Tensor, collab_feat_map: torch.Tensor) -> torch.Tensor:
         B, C, H, W = ego_feat_map.shape
         ego_seq = ego_feat_map.flatten(2).permute(0, 2, 1)
+        print("ego_seq.shape=", ego_seq.shape)
         collab_seq = collab_feat_map.flatten(2).permute(0, 2, 1)
+        print("collab_seq.shape=", collab_seq.shape)
         q = self.q_proj(ego_seq)
         k = self.k_proj(collab_seq)
         v = self.v_proj(collab_seq)
