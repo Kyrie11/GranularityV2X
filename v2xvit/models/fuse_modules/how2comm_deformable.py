@@ -33,7 +33,7 @@ class How2comm(nn.Module):
         #最终融合模块
         self.granularity_fusion = MultiGranularityFusionNet(args['granularity_trans'])
         # 通信模块
-        self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=10)
+        self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
