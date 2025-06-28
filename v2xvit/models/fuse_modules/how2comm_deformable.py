@@ -186,6 +186,7 @@ class How2comm(nn.Module):
                 node_feat = batch_node_feat[b]
                 node_det = batch_node_det[b]
                 fused_feat = self.granularity_fusion(node_vox, node_feat, node_det)
+                print("在batch循环里的fused_feat.shape=", fused_feat.shape)
                 fused_feat_list.append(fused_feat)
             fused_feat = torch.cat(fused_feat_list, dim=0)
 
