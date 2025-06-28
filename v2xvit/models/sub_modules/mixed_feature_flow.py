@@ -163,7 +163,7 @@ class ContextFusionMotionPredictor(nn.Module):
         # --- 4. 预测运动并外推 ---
         predicted_flow_at_delay, scale = self.final_flow_predictor(final_fused_context)
 
-        delay_expanded = torch.tensor(delay).float().view(B, 1, 1, 1)
+        delay_expanded = delay_tensor.float().view(B, 1, 1, 1)
         extrapolated_flow = predicted_flow_at_delay * delay_expanded
 
         # --- 5. 补偿与精炼 ---
