@@ -275,7 +275,8 @@ class MultiGranularityFusionNet(nn.Module):
         # 检查是否存在协作agents
         if num_agents <= 1:
             # 如果没有协作agent，则直接使用ego自身的特征
-            final_feature = self.final_fusion_layer(ego_encoded_feat)
+            H_fused_content = torch.zeros_like(ego_encoded_feat)
+            final_feature = self.final_fusion_layer(ego_encoded_feat+H_fused_content)
             print("当只有一个agent时，final_feature.shape=", final_feature.shape)
             return final_feature
 
@@ -313,6 +314,7 @@ class MultiGranularityFusionNet(nn.Module):
 
         # 将聚合后的令牌解码为BEV特征图 H_fused_content
         H_fused_content = self.token_decoder(fused_token)
+        print("H_fused_content.shape=", H_fused_content.shape)
 
         # --- 4. 最终融合 ---
         # 与Ego-agent的原始增强特征进行最终融合 (残差连接)
