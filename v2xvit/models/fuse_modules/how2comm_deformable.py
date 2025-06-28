@@ -153,7 +153,7 @@ class How2comm(nn.Module):
                                                   (H, W))
                 temp_det_list.append(neighbor_det)
 
-                temp_psm_list.append(warp_affine_simple(confidence_maps[b], t_matrix[0, :, :, :], (H, W)))
+                # temp_psm_list.append(warp_affine_simple(confidence_maps[b], t_matrix[0, :, :, :], (H, W)))
             vox_bev = torch.cat(temp_vox_list, dim=0)
             feat_bev = torch.cat(temp_list, dim=0)
             det_bev = torch.cat(temp_det_list, dim=0)
