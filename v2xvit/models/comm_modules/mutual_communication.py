@@ -305,6 +305,7 @@ class AdvancedCommunication(nn.Module):
                 sparse_vox_out.append(torch.empty(0, c_vox, H, W, device=device))
                 sparse_feat_out.append(torch.empty(0, c_feat, H, W, device=device))
                 sparse_det_out.append(torch.empty(0, c_det, H, W, device=device))
+                total_loss.append(torch.tensor(0, dtype=torch.float))
                 continue
 
             # 1. Separate Ego from Collaborators
