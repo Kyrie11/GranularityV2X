@@ -3,6 +3,7 @@ import os,sys,random
 import statistics
 
 import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
 torch.autograd.set_detect_anomaly(True)
 import tqdm
@@ -51,11 +52,11 @@ def main():
 
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
-                                  num_workers=8,
+                                  num_workers=32,
                                   collate_fn=opencood_train_dataset.collate_batch_train)
         val_loader = DataLoader(opencood_validate_dataset,
                                 sampler=sampler_val,
-                                num_workers=8,
+                                num_workers=32,
                                 collate_fn=opencood_train_dataset.collate_batch_train,
                                 drop_last=False)
     else:
