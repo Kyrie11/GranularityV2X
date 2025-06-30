@@ -30,7 +30,6 @@ def train_parser():
                         help='url used to set up distributed training')
     opt = parser.parse_args()
     opt.distributed= False
-    opt.half =True
     return opt
 
 def main():
