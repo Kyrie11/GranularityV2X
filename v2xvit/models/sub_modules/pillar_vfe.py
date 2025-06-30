@@ -68,7 +68,7 @@ class PFNLayer(nn.Module):
             part_linear_out = [self.linear(
                 inputs[num_part * self.part:(num_part + 1) * self.part])
                 for num_part in range(num_parts + 1)]
-            x = torch.cat(part_linear_out, dim=0)
+            x = torch.cat(part_linear_out, dim=0, device=inputs.device)
         else:
             x = self.linear(inputs)
         torch.backends.cudnn.enabled = False
