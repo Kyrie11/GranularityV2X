@@ -2,8 +2,8 @@ name: v2xset_how2comm_stcformer_opv2v
 # root_dir: '/data/v2xset/train'
 # validate_dir: '/data/v2xset/validate'
 
-root_dir: '/home/senzeyu2/dataset/opv2v/train'
-validate_dir: '/home/senzeyu2/dataset/opv2v/validate'
+root_dir: '/home/wang/code/dataset/opv2v/train'
+validate_dir: '/home/wang/code/dataset/opv2v/validate'
 
 wild_setting:
   async: false
@@ -24,7 +24,7 @@ train_params:
   eval_freq: 2
   save_freq: 1
   max_cav: &max_cav 5
-  frame: &frame 9
+  frame: &frame 3
 
 
 fusion:

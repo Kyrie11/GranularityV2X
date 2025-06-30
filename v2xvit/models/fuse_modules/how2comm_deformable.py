@@ -86,6 +86,7 @@ class How2comm(nn.Module):
             comp_F_feat = comp_F_fused[:,c_vox:c_vox+c_feat,:,:]
             comp_F_det = comp_F_fused[:,c_vox+c_feat:,:,:]
             offset_loss = self.compensation_criterion(predicted_bevs=[comp_F_vox, comp_F_feat, comp_F_det], ground_truth_bevs=bev_list)
+            print("offset_loss=", offset_loss)
             # 把ego-agent的当前帧补偿回去
             comp_F_vox_list = self.regroup(comp_F_vox.clone().detach(), record_len)
             comp_F_feat_list = self.regroup(comp_F_feat.clone().detach(), record_len)
@@ -162,7 +163,7 @@ class How2comm(nn.Module):
             #稀疏多粒度数据传输
             if self.communication_flag:
                 vox_bev_copy, feat_bev_copy, det_bev_copy, commu_loss, commu_volume = self.communication_net(temp_vox_list, temp_list, temp_det_list)
-
+                print("commu_loss=", commu_loss)
                 # sparse_vox = all_agents_sparse_transmitted_data[:, 0:self.c_d, :, :]
                 # sparse_feat = all_agents_sparse_transmitted_data[:, self.c_d:self.c_d + self.c_f, :, :]
                 # sparse_det = all_agents_sparse_transmitted_data[:, self.cd + self.c_f:, :, :]
