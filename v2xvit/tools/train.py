@@ -77,6 +77,7 @@ def main():
 
     print('---------------Creating Model------------------')
     model = train_utils.create_model(hypes)
+    model = nn.DataParallel(model)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # if we want to train from last checkpoint.
