@@ -1,16 +1,14 @@
 import argparse
 import os,sys,random
 import statistics
-import torch.nn as nn
+
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:2048"
 torch.autograd.set_detect_anomaly(True)
 import tqdm
 from torch.utils.data import DataLoader, DistributedSampler
 from tensorboardX import SummaryWriter
-import torch.distributed as dist
 import yaml
 from datetime import datetime
 import v2xvit.hypes_yaml.yaml_utils as yaml_utils
@@ -18,8 +16,6 @@ from v2xvit.tools import train_utils,infrence_utils
 from v2xvit.data_utils.datasets import build_dataset
 from v2xvit.tools import multi_gpu_utils
 import gc
-from torch.cuda.amp import autocast, GradScaler
-
 gc.collect()
 torch.cuda.empty_cache()
 
@@ -33,20 +29,10 @@ def train_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
     opt = parser.parse_args()
-    opt.half = True
-    opt.distributed = True
     return opt
 
-    # if 'LOCAL_RANK' in os.environ:
-    #     args.local_rank = int(os.environ['LOCAL_RANK'])
-    # args.distributed = args.world_size > 1
-    # if args.distributed:
-    #     # This is correct
-    #     torch.cuda.set_device(args.local_rank)
-    #     dist.init_process_group(backend='nccl', init_method='env://')
-    #     args.gpu = args.local_rank
-
 def main():
+
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
     multi_gpu_utils.init_distributed_mode(opt)
@@ -66,21 +52,21 @@ def main():
 
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
-                                  num_workers=8,
+                                  num_workers=32,
                                   collate_fn=opencood_train_dataset.collate_batch_train)
         val_loader = DataLoader(opencood_validate_dataset,
                                 sampler=sampler_val,
-                                num_workers=8,
+                                num_workers=32,
                                 collate_fn=opencood_train_dataset.collate_batch_train,
                                 drop_last=False)
     else:
         train_loader = DataLoader(opencood_train_dataset,
-                                  batch_size=hypes['train_params']['batch_size'],
-                                  num_workers=8,
-                                  collate_fn=opencood_train_dataset.collate_batch_train,
-                                  shuffle=True,
-                                  pin_memory=False,
-                                  drop_last=True)
+                                batch_size=hypes['train_params']['batch_size'],
+                                num_workers=8,
+                                collate_fn=opencood_train_dataset.collate_batch_train,
+                                shuffle=True,
+                                pin_memory=False,
+                                drop_last=True)
         val_loader = DataLoader(opencood_validate_dataset,
                                 batch_size=hypes['train_params']['batch_size'],
                                 num_workers=8,
@@ -102,6 +88,7 @@ def main():
         init_epoch = 0
         # if we train the model from scratch, we need to create a folder
         # to save the model,
+        # saved_path = train_utils.setup_train(hypes)
         saved_path = train_utils.setup_train(hypes)
 
     # we assume gpu is necessary
@@ -115,7 +102,7 @@ def main():
                                                       device_ids=[opt.gpu],
                                                       find_unused_parameters=True)
         model_without_ddp = model.module
-    
+
     # define the loss
     criterion = train_utils.create_loss(hypes)
 
@@ -132,7 +119,7 @@ def main():
     # half precision training
     if opt.half:
         scaler = torch.cuda.amp.GradScaler()
-    print("device is",device)
+
     print('Training start')
     epoches = hypes['train_params']['epoches']
     # used to help schedule learning rate
@@ -150,7 +137,6 @@ def main():
         pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
         record_len_list = []
         for i, batch_data_list in enumerate(train_loader):
-            print("加载了数据:", len(train_loader))
             for v in batch_data_list:
                 record_len_list.append(v['ego']['record_len'][0].item())
             if len(set(record_len_list)) != 1:
@@ -161,7 +147,7 @@ def main():
             model.train()
             model.zero_grad()
             optimizer.zero_grad()
-            
+
             batch_data = batch_data_list[0]
 
             batch_data_list = train_utils.to_device(batch_data_list, device)
@@ -193,11 +179,10 @@ def main():
                 final_loss.backward()
                 optimizer.step()
             else:
-                print("使用半精度计算")
                 scaler.scale(final_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
-                
+
         if epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
