@@ -9,6 +9,7 @@ torch.autograd.set_detect_anomaly(True)
 import tqdm
 from torch.utils.data import DataLoader, DistributedSampler
 from tensorboardX import SummaryWriter
+import torch.distributed as dist
 import yaml
 from datetime import datetime
 import v2xvit.hypes_yaml.yaml_utils as yaml_utils
@@ -28,8 +29,22 @@ def train_parser():
     parser.add_argument("--half", action='store_true', help="whether train with half precision")
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
-    opt = parser.parse_args()
-    return opt
+    parser.add_argument('--accumulation_steps', type=int, default=1,
+                        help='Number of steps to accumulate gradients over')
+    parser.add_argument('--local_rank', type=int, default=-1)
+
+    args = parser.parse_args()
+
+    if 'LOCAL_RANK' in os.environ:
+        args.local_rank = int(os.environ['LOCAL_RANK'])
+    args.distributed = args.world_size > 1
+    if args.distributed:
+        # This is correct
+        torch.cuda.set_device(args.local_rank)
+        dist.init_process_group(backend='nccl', init_method='env://')
+        args.gpu = args.local_rank
+
+    return args
 
 def main():
 
@@ -78,7 +93,7 @@ def main():
     print('---------------Creating Model------------------')
     model = train_utils.create_model(hypes)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+    model.to(opt.gpu)
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
@@ -96,7 +111,7 @@ def main():
         model.to(device)
     model_without_ddp = model
     
-    if True:
+    if opt.distributed:
         model = \
             torch.nn.parallel.DistributedDataParallel(model,
                                                       device_ids=[opt.gpu],
