@@ -71,22 +71,6 @@ class PFNLayer(nn.Module):
                 for num_part in range(num_parts + 1)]
             x = torch.cat(part_linear_out, dim=0, device=inputs.device)
         else:
-            print("inputs的device:", inputs.device)
-            print(f"Linear layer weight device: {self.linear.weight.device}")
-            if self.linear.bias is not None:
-                print(f"Linear layer bias device:   {self.linear.bias.device}")
-            print("inputs的dtype:", inputs.dtype)
-            print(f"Linear layer weight dtype:  {self.linear.weight.dtype}")
-
-            print(f"Input tensor shape:         {inputs.shape}")
-            print(f"Linear layer in_features:   {self.linear.in_features}")
-            print(f"Linear layer out_features:  {self.linear.out_features}")
-
-            has_nan = torch.isnan(inputs).any()
-            has_inf = torch.isinf(inputs).any()
-            print(f"Input has NaNs:             {has_nan}")
-            print(f"Input has Infs:             {has_inf}")
-
             x = self.linear(inputs)
         torch.backends.cudnn.enabled = False
         x = self.norm(x.permute(0, 2, 1)).permute(0, 2,

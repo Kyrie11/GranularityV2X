@@ -1,3 +1,3 @@
 
-CUDA_LAUNCH_BLOCKING=0  CUDA_VISIBLE_DEVICES=0 python v2xvit/tools/train.py --hypes_yaml v2xvit/hypes_yaml/how2comm/v2xset_how2comm_stcformer.yaml 
+CUDA_LAUNCH_BLOCKING=0  CUDA_VISIBLE_DEVICES=0,1 python v2xvit/tools/train.py --hypes_yaml v2xvit/hypes_yaml/how2comm/v2xset_how2comm_stcformer.yaml 
 
