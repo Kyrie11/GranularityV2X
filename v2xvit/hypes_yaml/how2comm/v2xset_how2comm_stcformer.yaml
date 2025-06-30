@@ -24,7 +24,7 @@ train_params:
   eval_freq: 2
   save_freq: 1
   max_cav: &max_cav 5
-  frame: &frame 6
+  frame: &frame 5
 
 
 fusion:
