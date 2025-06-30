@@ -89,26 +89,38 @@ class How2comm(nn.Module):
             comp_F_vox = comp_F_fused[:,0:c_vox,:,:]
             comp_F_feat = comp_F_fused[:,c_vox:c_vox+c_feat,:,:]
             comp_F_det = comp_F_fused[:,c_vox+c_feat:,:,:]
+
+            #把ego的帧返回回去
+            #补偿后的结果
+            comp_F_vox_batchs = self.regroup(comp_F_vox, record_len)
+            comp_F_feat_batchs = self.regroup(comp_F_feat, record_len)
+            comp_F_det_batchs = self.regroup(comp_F_det, record_len)
+            #原始的帧
+            curr_vox_batchs = self.regroup(curr_vox_bev, record_len)
+            curr_feat_batchs = self.regroup(curr_feat_bev, record_len)
+            curr_det_batchs = self.regroup(curr_det_bev, record_len)
+
+            for bs in range(len(comp_F_vox_batchs)):
+                comp_F_vox_batchs[bs][0] = curr_vox_batchs[bs][0]
+                comp_F_feat_batchs[bs][0] = curr_feat_batchs[bs][0]
+                comp_F_det_batchs[bs][0] = curr_det_batchs[bs][0]
+
+            #补偿原始Ego的帧
+            comp_F_vox = torch.cat(comp_F_vox_batchs, dim=0)
+            comp_F_feat = torch.cat(comp_F_feat_batchs, dim=0)
+            comp_F_det = torch.cat(comp_F_det_batchs, dim=0)
+
             offset_loss = self.compensation_criterion(comp_F_vox, comp_F_feat, comp_F_det, curr_vox_bev, curr_feat_bev, curr_det_bev)
             print("offset_loss=", offset_loss)
             # 把ego-agent的当前帧补偿回去
-            comp_F_vox_list = self.regroup(comp_F_vox.clone().detach(), record_len)
-            comp_F_feat_list = self.regroup(comp_F_feat.clone().detach(), record_len)
-            comp_F_det_list = self.regroup(comp_F_det.clone().detach(), record_len)
-            vox_bev_list = self.regroup(curr_vox_bev.clone().detach(), record_len)
-            feat_bev_list = self.regroup(curr_feat_bev.clone().detach(), record_len)
-            det_bev_list = self.regroup(curr_det_bev.clone().detach(), record_len)
-            for bs in range(B):
-                comp_F_vox_list[bs][0] = vox_bev_list[bs][0]
-                comp_F_feat_list[bs][0] = feat_bev_list[bs][0]
-                comp_F_det_list[bs][0] = det_bev_list[bs][0]
-            vox_bev_copy = torch.cat(comp_F_vox_list, dim=0)
-            feat_bev_copy = torch.cat(comp_F_feat_list, dim=0)
-            det_bev_copy = torch.cat(det_bev_list, dim=0)
+
+            vox_bev_copy = comp_F_vox
+            feat_bev_copy = comp_F_feat
+            det_bev_copy = comp_F_det
         else:
-            vox_bev_copy = curr_vox_bev.clone().detach()
-            feat_bev_copy = curr_feat_bev.clone().detach()
-            det_bev_copy = curr_det_bev.clone().detach()
+            vox_bev_copy = curr_vox_bev
+            feat_bev_copy = curr_feat_bev
+            det_bev_copy = curr_det_bev
             offset_loss = torch.zeros(1).to(curr_feat_bev.device)
         print("第二次检查feat_bev.shape=", feat_bev_copy.shape)
         #把增强后的ego特征放入
