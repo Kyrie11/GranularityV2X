@@ -32,12 +32,8 @@ def train_parser():
     parser.add_argument("--half", action='store_true', help="whether train with half precision")
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
-    parser.add_argument('--accumulation_steps', type=int, default=1,
-                        help='Number of steps to accumulate gradients over')
-    parser.add_argument('--local_rank', type=int, default=-1)
-
-    parser.add_argument("--distributed", type=int, default=1)
-    args = parser.parse_args()
+    opt = parser.parse_args()
+    return opt
 
     # if 'LOCAL_RANK' in os.environ:
     #     args.local_rank = int(os.environ['LOCAL_RANK'])
@@ -47,8 +43,6 @@ def train_parser():
     #     torch.cuda.set_device(args.local_rank)
     #     dist.init_process_group(backend='nccl', init_method='env://')
     #     args.gpu = args.local_rank
-
-    return args
 
 def main():
 
