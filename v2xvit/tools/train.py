@@ -33,6 +33,8 @@ def train_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
     opt = parser.parse_args()
+    opt.half = True
+    opt.distributed = True
     return opt
 
     # if 'LOCAL_RANK' in os.environ:
