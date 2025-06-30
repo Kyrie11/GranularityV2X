@@ -17,6 +17,8 @@ from v2xvit.tools import train_utils,infrence_utils
 from v2xvit.data_utils.datasets import build_dataset
 from v2xvit.tools import multi_gpu_utils
 import gc
+from torch.cuda.amp import autocast, GradScaler
+
 gc.collect()
 torch.cuda.empty_cache()
 
@@ -59,6 +61,7 @@ def main():
                                               visualize=False,
                                               train=False)
     if opt.distributed:
+        print("——————使用分布式的方式————————")
         sampler_train = DistributedSampler(opencood_train_dataset)
         sampler_val = DistributedSampler(opencood_validate_dataset,
                                          shuffle=False)
