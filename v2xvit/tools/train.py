@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:64"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:2048"
 torch.autograd.set_detect_anomaly(True)
 import tqdm
 from torch.utils.data import DataLoader, DistributedSampler
@@ -193,6 +193,7 @@ def main():
             time.sleep(0.001)
             # back-propagation
             if not opt.half:
+                print("使用半精度计算")
                 final_loss.backward()
                 optimizer.step()
             else:
