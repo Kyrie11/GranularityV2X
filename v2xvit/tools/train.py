@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:1024"
 torch.autograd.set_detect_anomaly(True)
 import tqdm
 from torch.utils.data import DataLoader, DistributedSampler
