@@ -62,7 +62,7 @@ class How2comm(nn.Module):
             curr_bev_batch[i][0] = enhanced_features[i]
         return torch.cat(curr_bev_batch, dim=0)
 
-    def return_ego_curr(self, ):
+
 
     def forward(self, record_len, pairwise_t_matrix, his_vox=None, his_feat=None, his_det=None):
         curr_vox_bev = his_vox[0]
