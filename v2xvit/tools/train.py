@@ -47,7 +47,6 @@ def train_parser():
     #     args.gpu = args.local_rank
 
 def main():
-
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
     multi_gpu_utils.init_distributed_mode(opt)
@@ -58,7 +57,6 @@ def main():
                                               visualize=False,
                                               train=False)
     if opt.distributed:
-        print("——————使用分布式的方式————————")
         sampler_train = DistributedSampler(opencood_train_dataset)
         sampler_val = DistributedSampler(opencood_validate_dataset,
                                          shuffle=False)
@@ -68,21 +66,21 @@ def main():
 
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
-                                  num_workers=32,
+                                  num_workers=8,
                                   collate_fn=opencood_train_dataset.collate_batch_train)
         val_loader = DataLoader(opencood_validate_dataset,
                                 sampler=sampler_val,
-                                num_workers=32,
+                                num_workers=8,
                                 collate_fn=opencood_train_dataset.collate_batch_train,
                                 drop_last=False)
     else:
         train_loader = DataLoader(opencood_train_dataset,
-                                batch_size=hypes['train_params']['batch_size'],
-                                num_workers=8,
-                                collate_fn=opencood_train_dataset.collate_batch_train,
-                                shuffle=True,
-                                pin_memory=False,
-                                drop_last=True)
+                                  batch_size=hypes['train_params']['batch_size'],
+                                  num_workers=8,
+                                  collate_fn=opencood_train_dataset.collate_batch_train,
+                                  shuffle=True,
+                                  pin_memory=False,
+                                  drop_last=True)
         val_loader = DataLoader(opencood_validate_dataset,
                                 batch_size=hypes['train_params']['batch_size'],
                                 num_workers=8,
@@ -94,7 +92,7 @@ def main():
     print('---------------Creating Model------------------')
     model = train_utils.create_model(hypes)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(opt.gpu)
+
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
@@ -104,14 +102,13 @@ def main():
         init_epoch = 0
         # if we train the model from scratch, we need to create a folder
         # to save the model,
-        # saved_path = train_utils.setup_train(hypes)
         saved_path = train_utils.setup_train(hypes)
 
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.to(device)
     model_without_ddp = model
-    
+
     if opt.distributed:
         model = \
             torch.nn.parallel.DistributedDataParallel(model,
@@ -193,10 +190,10 @@ def main():
             time.sleep(0.001)
             # back-propagation
             if not opt.half:
-                print("使用半精度计算")
                 final_loss.backward()
                 optimizer.step()
             else:
+                print("使用半精度计算")
                 scaler.scale(final_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
