@@ -157,6 +157,7 @@ def main():
         pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
         record_len_list = []
         for i, batch_data_list in enumerate(train_loader):
+            print("加载了数据:", len(train_loader))
             for v in batch_data_list:
                 record_len_list.append(v['ego']['record_len'][0].item())
             if len(set(record_len_list)) != 1:

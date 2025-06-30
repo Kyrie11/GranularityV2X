@@ -144,7 +144,6 @@ class How2comm(nn.Module):
             temp_list = []
             temp_vox_list = []
             temp_det_list = []
-            temp_psm_list = []
             for b in range(B):
                 N = record_len[b]
                 t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
