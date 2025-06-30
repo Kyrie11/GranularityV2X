@@ -1,7 +1,7 @@
 import argparse
 import os,sys,random
 import statistics
-
+import nn
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
