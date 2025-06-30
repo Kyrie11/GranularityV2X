@@ -119,7 +119,7 @@ def main():
     # half precision training
     if opt.half:
         scaler = torch.cuda.amp.GradScaler()
-
+    print("device is",device)
     print('Training start')
     epoches = hypes['train_params']['epoches']
     # used to help schedule learning rate
