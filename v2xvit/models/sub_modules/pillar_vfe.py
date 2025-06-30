@@ -1,6 +1,7 @@
 """
 Pillar VFE, credits to OpenPCDet.
 """
+from os import device_encoding
 
 import torch
 import torch.nn as nn
@@ -70,7 +71,7 @@ class PFNLayer(nn.Module):
                 for num_part in range(num_parts + 1)]
             x = torch.cat(part_linear_out, dim=0, device=inputs.device)
         else:
-            x = self.linear(inputs)
+            x = self.linear(inputs, device=inputs.device)
         torch.backends.cudnn.enabled = False
         x = self.norm(x.permute(0, 2, 1)).permute(0, 2,
                                                   1) if self.use_norm else x
