@@ -33,16 +33,17 @@ def train_parser():
                         help='Number of steps to accumulate gradients over')
     parser.add_argument('--local_rank', type=int, default=-1)
 
+    parser.add_argument("--distributed", type=int, default=1)
     args = parser.parse_args()
 
-    if 'LOCAL_RANK' in os.environ:
-        args.local_rank = int(os.environ['LOCAL_RANK'])
-    args.distributed = args.world_size > 1
-    if args.distributed:
-        # This is correct
-        torch.cuda.set_device(args.local_rank)
-        dist.init_process_group(backend='nccl', init_method='env://')
-        args.gpu = args.local_rank
+    # if 'LOCAL_RANK' in os.environ:
+    #     args.local_rank = int(os.environ['LOCAL_RANK'])
+    # args.distributed = args.world_size > 1
+    # if args.distributed:
+    #     # This is correct
+    #     torch.cuda.set_device(args.local_rank)
+    #     dist.init_process_group(backend='nccl', init_method='env://')
+    #     args.gpu = args.local_rank
 
     return args
 
