@@ -62,10 +62,14 @@ class How2comm(nn.Module):
             curr_bev_batch[i][0] = enhanced_features[i]
         return torch.cat(curr_bev_batch, dim=0)
 
-    def forward(self, bev_list, psm, record_len, pairwise_t_matrix, his_vox=None, his_feat=None, his_det=None):
-        vox_bev, feat_bev, det_bev = bev_list
-        print("第一次检查feat_bev.shape=", feat_bev.shape)
-        _, _, H, W = feat_bev.shape
+    def return_ego_curr(self, ):
+
+    def forward(self, record_len, pairwise_t_matrix, his_vox=None, his_feat=None, his_det=None):
+        curr_vox_bev = his_vox[0]
+        curr_feat_bev = his_feat[0]
+        curr_det_bev = his_det[0]
+        print("第一次检查feat_bev.shape=", curr_feat_bev.shape)
+        _, _, H, W = curr_feat_bev.shape
         B, L = pairwise_t_matrix.shape[:2]
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
             0, 1], :][:, :, :, :, [0, 1, 3]]
@@ -77,23 +81,23 @@ class How2comm(nn.Module):
                                                          2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
 
-        c_vox = vox_bev.shape[1]
-        c_feat = feat_bev.shape[1]
-        if his_vox:
+        c_vox = curr_vox_bev.shape[1]
+        c_feat = curr_feat_bev.shape[1]
+        if len(his_vox) > 1:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
             comp_F_fused, _, _ = self.mgdc_bev_compensator(his_vox, his_feat, his_det, record_len)
             comp_F_vox = comp_F_fused[:,0:c_vox,:,:]
             comp_F_feat = comp_F_fused[:,c_vox:c_vox+c_feat,:,:]
             comp_F_det = comp_F_fused[:,c_vox+c_feat:,:,:]
-            offset_loss = self.compensation_criterion(predicted_bevs=[comp_F_vox, comp_F_feat, comp_F_det], ground_truth_bevs=bev_list)
+            offset_loss = self.compensation_criterion(comp_F_vox, comp_F_feat, comp_F_det, curr_vox_bev, curr_feat_bev, curr_det_bev)
             print("offset_loss=", offset_loss)
             # 把ego-agent的当前帧补偿回去
             comp_F_vox_list = self.regroup(comp_F_vox.clone().detach(), record_len)
             comp_F_feat_list = self.regroup(comp_F_feat.clone().detach(), record_len)
             comp_F_det_list = self.regroup(comp_F_det.clone().detach(), record_len)
-            vox_bev_list = self.regroup(vox_bev.clone().detach(), record_len)
-            feat_bev_list = self.regroup(feat_bev.clone().detach(), record_len)
-            det_bev_list = self.regroup(det_bev.clone().detach(), record_len)
+            vox_bev_list = self.regroup(curr_vox_bev.clone().detach(), record_len)
+            feat_bev_list = self.regroup(curr_feat_bev.clone().detach(), record_len)
+            det_bev_list = self.regroup(curr_det_bev.clone().detach(), record_len)
             for bs in range(B):
                 comp_F_vox_list[bs][0] = vox_bev_list[bs][0]
                 comp_F_feat_list[bs][0] = feat_bev_list[bs][0]
@@ -102,10 +106,10 @@ class How2comm(nn.Module):
             feat_bev_copy = torch.cat(comp_F_feat_list, dim=0)
             det_bev_copy = torch.cat(det_bev_list, dim=0)
         else:
-            vox_bev_copy = vox_bev.clone().detach()
-            feat_bev_copy = feat_bev.clone().detach()
-            det_bev_copy = det_bev.clone().detach()
-            offset_loss = torch.zeros(1).to(feat_bev.device)
+            vox_bev_copy = curr_vox_bev.clone().detach()
+            feat_bev_copy = curr_feat_bev.clone().detach()
+            det_bev_copy = curr_det_bev.clone().detach()
+            offset_loss = torch.zeros(1).to(curr_feat_bev.device)
         print("第二次检查feat_bev.shape=", feat_bev_copy.shape)
         #把增强后的ego特征放入
         # 对ego的帧进行增强
@@ -113,12 +117,12 @@ class How2comm(nn.Module):
         print("第三次检查feat_bev.shape=", feat_bev_copy.shape)
 
         fused_feat_list = []
-        fused_feat = torch.tensor(0).to(feat_bev.device)
+        fused_feat = torch.tensor(0).to(curr_feat_bev.device)
         commu_volume = 0
-        commu_loss = torch.tensor(0).to(feat_bev.device)
+        commu_loss = torch.tensor(0).to(curr_feat_bev.device)
         #先不考虑multi_scale
         if self.communication:
-            batch_confidence_maps = self.regroup(psm, record_len)
+            # batch_confidence_maps = self.regroup(psm, record_len)
             # _, _, confidence_maps = self.naive_communication(batch_confidence_maps)
 
             batch_temp_features = self.regroup(feat_bev_copy, record_len)
@@ -174,8 +178,8 @@ class How2comm(nn.Module):
                 # det_bev = F.interpolate(sparse_det, scale_factor=1, mode="bilinear", align_corners=False)
                 # det_bev = self.channel_fuse(det_bev)
             else:
-                commu_volume = torch.tensor(0).to(feat_bev.device)
-                commu_loss = torch.zeros(1).to(feat_bev.device)
+                commu_volume = torch.tensor(0).to(curr_feat_bev.device)
+                commu_loss = torch.zeros(1).to(curr_feat_bev.device)
             print("第五次检查feat_bev.shape=", feat_bev_copy.shape)
 
             batch_node_feat = self.regroup(feat_bev_copy, record_len)

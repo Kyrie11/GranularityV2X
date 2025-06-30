@@ -61,7 +61,7 @@ class CompensationLoss(nn.Module):
         # 3. vox_bev 的损失函数 (L1)
         # 我们复用 self.l1_loss 即可
 
-    def forward(self, predicted_bevs, ground_truth_bevs):
+    def forward(self, pred_vox, pred_feat, pred_det, curr_vox, curr_feat, curr_det):
         """
         计算总损失。
 
@@ -70,9 +70,9 @@ class CompensationLoss(nn.Module):
             ground_truth_bevs (dict): 包含 'vox_bev', 'feature_bev', 'det_bev' 的字典，值为t0时刻的真值Tensor。
         """
         # 从字典中获取预测值和真值
-        pred_vox, pred_feat, pred_det = predicted_bevs
+        pred_vox, pred_feat, pred_det = pred_vox, pred_feat, pred_det
 
-        gt_vox, gt_feat, gt_det = ground_truth_bevs
+        gt_vox, gt_feat, gt_det = curr_vox, curr_feat, curr_det
 
         # 确保SSIM的设备与输入一致
         self.ssim = self.ssim.to(pred_feat.device)

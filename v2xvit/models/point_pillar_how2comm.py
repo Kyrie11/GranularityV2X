@@ -139,7 +139,7 @@ class PointPillarHow2comm(nn.Module):
             spatial_features = self.avg_pool(spatial_features)
             his_feat.append(spatial_features)
 
-            feature_2d_list.append(spatial_features_2d)
+            # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
 
             vox_bev = batch_dict['vox_bev']
@@ -157,33 +157,26 @@ class PointPillarHow2comm(nn.Module):
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
-        spatial_features_2d = feature_2d_list[0]
+        # spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
-        psm_single = self.cls_head(spatial_features_2d)
+        # psm_single = self.cls_head(spatial_features_2d)
         # rm_single = self.reg_head(spatial_features_2d)
-        print("spatial_feature_2d.shape=", spatial_features_2d.shape)
-        print("spatial_feature.shape=", spatial_features.shape)
+        # print("spatial_feature_2d.shape=", spatial_features_2d.shape)
+        # print("spatial_feature.shape=", spatial_features.shape)
         # print("vox_bev.shape=",vox_bev.shape)
         # print("det_bev.shape=", det_bev.shape)
-        #得到三个粒度的bev
-        vox_bev = torch.tensor(his_vox[0])
-        feat_bev = his_feat[0]
-        det_bev = his_det[0]
-        fused_bev = [vox_bev, feat_bev, det_bev]
 
-        c_vox = vox_bev.shape[1]
-        c_feat = feat_bev.shape[1]
-        c_det = det_bev.shape[1]
+
 
         # fused_his = [his_vox, his_feat, his_det]
 
         if self.delay == 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
+                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
         elif self.delay > 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         print("fused_feat_list.shape=",fused_feature.shape)
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)
