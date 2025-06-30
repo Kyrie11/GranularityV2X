@@ -77,7 +77,6 @@ def main():
 
     print('---------------Creating Model------------------')
     model = train_utils.create_model(hypes)
-    model = nn.DataParallel(model)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # if we want to train from last checkpoint.
@@ -97,7 +96,7 @@ def main():
         model.to(device)
     model_without_ddp = model
     
-    if opt.distributed:
+    if True:
         model = \
             torch.nn.parallel.DistributedDataParallel(model,
                                                       device_ids=[opt.gpu],
