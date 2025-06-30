@@ -19,9 +19,6 @@ def transform_feature(feature_list, delay):
 class PointPillarHow2comm(nn.Module):
     def __init__(self, args):
         super(PointPillarHow2comm, self).__init__()
-
-
-
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
                                     num_point_features=4,
                                     voxel_size=args['voxel_size'],
@@ -47,7 +44,7 @@ class PointPillarHow2comm(nn.Module):
 
         self.fusion_net = How2comm(args['fusion_args'], args)
         self.frame = args['fusion_args']['frame']
-        self.delay = 3
+        self.delay = args['fusion_args']['delay']
         self.discrete_ratio = args['fusion_args']['voxel_size'][0]
         self.downsample_rate = args['fusion_args']['downsample_rate']
         self.multi_scale = args['fusion_args']['multi_scale']
@@ -56,11 +53,17 @@ class PointPillarHow2comm(nn.Module):
                                   kernel_size=1)
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
+
+        self.avg_pool = nn.AvgPool2d(kernel_size=2, stride=2)
+
         if args['backbone_fix']:
             self.backbone_fix()
 
         self.history_max_len = args.get("history_max_len", 10)
 
+        self.num_short_frames = 3
+        self.num_long_frames = 3
+        self.long_interval = 3
 
 
 
@@ -95,24 +98,18 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, data_dict_list):
-        print("len(data_dict_list)=", len(data_dict_list))
         batch_dict_list = []
-        feature_list = []
         feature_2d_list = []
         matrix_list = []
-        regroup_feature_list = []
-        regroup_feature_list_large = []
-        regroup_vox_list = []
-        regroup_det_list = []
-
-
+        his_vox = []
+        his_feat = []
+        his_det = []
         for origin_data in data_dict_list:
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
-            print("record_len=", record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
@@ -139,85 +136,69 @@ class PointPillarHow2comm(nn.Module):
 
             batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
-            feature_list.append(spatial_features)
+            spatial_features = self.avg_pool(spatial_features)
+            his_feat.append(spatial_features)
+
             feature_2d_list.append(spatial_features_2d)
-            # print("feature_2d_list.len=",len(feature_2d_list))
-            # print("spatial_feature2d.shape=",spatial_features_2d.shape)
             matrix_list.append(pairwise_t_matrix)
-            regroup_feature_list.append(self.regroup(
-                spatial_features_2d, record_len))
-            # print("regroup_feature_list.len=",len(regroup_feature_list))
-            regroup_feature_list_large.append(
-                self.regroup(spatial_features, record_len))
-            # print("regroup_feature_list_large.shape=",regroup_feature_list_large[-1][0].shape)
 
             vox_bev = batch_dict['vox_bev']
             #下采样
             vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
-            regroup_vox_list.append(self.regroup(vox_bev, record_len))
+            his_vox.append(vox_bev)
+
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
             # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
             # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
             # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
             det_bev = torch.cat([psm, rm], dim=1)
-            regroup_det_list.append(self.regroup(det_bev, record_len))
-
-
+            his_det.append(det_bev)
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
-
-        short_history_feature = regroup_feature_list_large[-1:-4:-1]
-        long_history_feature = regroup_feature_list_large[len(regroup_feature_list)-1::-4]
-
-        short_history_vox = regroup_vox_list[-1:-4:-1]
-        long_history_vox = regroup_vox_list[len(regroup_feature_list)-1::-4]
-
-        short_history_det = regroup_det_list[-1:-4:-1]
-        long_history_det = regroup_det_list[len(regroup_feature_list)-1::-4]
-
-        spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
         psm_single = self.cls_head(spatial_features_2d)
-        rm_single = self.reg_head(spatial_features_2d)
-
-        # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-        # upsampled_psm= F.interpolate(psm_single, size=(target_H, target_W), mode='bilinear', align_corners=False)
-        # upsampled_rm = F.interpolate(rm_single, size=(target_H, target_W), mode="bilinear", align_corners=False)
+        # rm_single = self.reg_head(spatial_features_2d)
+        print("spatial_feature_2d.shape=", spatial_features_2d.shape)
+        print("spatial_feature.shape=", spatial_features.shape)
+        # print("vox_bev.shape=",vox_bev.shape)
+        # print("det_bev.shape=", det_bev.shape)
         #得到三个粒度的bev
-        vox_bev = torch.tensor(batch_dict['vox_bev'])
-        # det_bev = torch.cat([upsampled_psm, upsampled_rm], dim=1)
-        det_bev = torch.cat([psm_single, rm_single], dim=1)
-        fused_bev = [vox_bev, spatial_features, det_bev]
+        vox_bev = torch.tensor(his_vox[0])
+        feat_bev = his_feat[0]
+        det_bev = his_det[0]
+        fused_bev = [vox_bev, feat_bev, det_bev]
 
-        fused_long_his = [long_history_vox, long_history_feature, long_history_det]
-        fused_short_his = [short_history_vox, short_history_feature, short_history_det]
+        c_vox = vox_bev.shape[1]
+        c_feat = feat_bev.shape[1]
+        c_det = det_bev.shape[1]
 
+        # fused_his = [his_vox, his_feat, his_det]
 
         if self.delay == 0:
-            fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head])
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+                bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
         elif self.delay > 0:
-            fused_feature, communication_rates, result_dict, offset_loss, commu_loss, _, _ = self.fusion_net(
-                fused_bev, psm_single, record_len, pairwise_t_matrix, self.backbone,
-                [self.shrink_conv, self.cls_head, self.reg_head], short_history=fused_short_his, long_history=fused_long_his)
-        if self.shrink_flag:
-            fused_feature = self.shrink_conv(fused_feature)
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+                bev_list=fused_bev, psm=psm_single, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+        print("fused_feat_list.shape=",fused_feature.shape)
+        # if self.shrink_flag:
+        #     fused_feature = self.shrink_conv(fused_feature)
 
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
-
-        output_dict = {'psm': psm,
-                       'rm': rm
-                       }
-
-        output_dict.update(result_dict)
-        output_dict.update({'comm_rate': communication_rates,
-                            "offset_loss": offset_loss,
-                            'commu_loss': commu_loss
-                            })
+        output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
+        # output_dict = {'psm': psm,
+        #                'rm': rm
+        #                }
+        #
+        # # output_dict.update(result_dict)
+        # output_dict.update({'comm_rate': commu_volume,
+        #                     "offset_loss": offset_loss,
+        #                     'commu_loss': commu_loss
+        #                     })
+        # return output_dict

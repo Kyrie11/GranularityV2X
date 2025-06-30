@@ -3,6 +3,7 @@ import os,sys,random
 import statistics
 
 import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
 import os,time
 torch.autograd.set_detect_anomaly(True)
 import tqdm
@@ -51,11 +52,11 @@ def main():
 
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
-                                  num_workers=8,
+                                  num_workers=32,
                                   collate_fn=opencood_train_dataset.collate_batch_train)
         val_loader = DataLoader(opencood_validate_dataset,
                                 sampler=sampler_val,
-                                num_workers=8,
+                                num_workers=32,
                                 collate_fn=opencood_train_dataset.collate_batch_train,
                                 drop_last=False)
     else:
@@ -93,7 +94,7 @@ def main():
 
         folder_name = current_time.strftime("_%Y_%m_%d_%H_%M_%S")
         folder_name = model_name + folder_name
-        full_path = os.path.join("/home/wang/code/GranularityV2X/logs/", folder_name)
+        full_path = os.path.join("/home/senzeyu2/code/GranularityV2X/logs/", folder_name)
         if not os.path.exists(full_path):
             os.makedirs(full_path)
             # save the yaml file
@@ -173,7 +174,7 @@ def main():
                 ouput_dict = model(batch_data_list)
                 final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
-                final_loss += ouput_dict["offset_loss"][0] + ouput_dict["commu_loss"][0]
+                final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
                     ouput_dict = model(batch_data_list)
@@ -181,7 +182,7 @@ def main():
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
-                    final_loss += ouput_dict["offset_loss"][0] + ouput_dict["commu_loss"][0]
+                    final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)
             time.sleep(0.001)
