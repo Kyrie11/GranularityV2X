@@ -89,20 +89,8 @@ def main():
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         # saved_path = train_utils.setup_train(hypes)
-        model_name = hypes['name']
-        current_time = datetime.now()
+        saved_path = train_utils.setup_train(hypes)
 
-        folder_name = current_time.strftime("_%Y_%m_%d_%H_%M_%S")
-        folder_name = model_name + folder_name
-        full_path = os.path.join("/home/senzeyu2/code/GranularityV2X/logs/", folder_name)
-        if not os.path.exists(full_path):
-            os.makedirs(full_path)
-            # save the yaml file
-            save_name = os.path.join(full_path, 'config.yaml')
-            with open(save_name, 'w') as outfile:
-                yaml.dump(hypes, outfile)
-        saved_path = full_path
-    print("saved_path is %s", saved_path)
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.to(device)
