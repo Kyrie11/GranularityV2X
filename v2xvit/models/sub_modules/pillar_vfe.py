@@ -78,12 +78,12 @@ class PFNLayer(nn.Module):
             print("inputs的dtype:", inputs.dtype)
             print(f"Linear layer weight dtype:  {self.linear.weight.dtype}")
 
-            print(f"Input tensor shape:         {input.shape}")
+            print(f"Input tensor shape:         {inputs.shape}")
             print(f"Linear layer in_features:   {self.linear.in_features}")
             print(f"Linear layer out_features:  {self.linear.out_features}")
 
-            has_nan = torch.isnan(input).any()
-            has_inf = torch.isinf(input).any()
+            has_nan = torch.isnan(inputs).any()
+            has_inf = torch.isinf(inputs).any()
             print(f"Input has NaNs:             {has_nan}")
             print(f"Input has Infs:             {has_inf}")
 
