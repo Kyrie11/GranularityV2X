@@ -172,7 +172,7 @@ class ContextFusionMotionPredictor(nn.Module):
                                             dtype=fused_to_compensate.dtype)
 
         # --- 3. 融合上下文 ---
-        delay_tensor = torch.full((B,), delay, dtype=torch.long)
+        delay_tensor = torch.full((B,), delay, dtype=torch.long, device=self.delay_embedding.device)
         print("delay.shape=", delay_tensor.shape)
         delay_emb = self.delay_embedding(delay_tensor)
         print("delay_emb.shape=", delay_emb.shape)

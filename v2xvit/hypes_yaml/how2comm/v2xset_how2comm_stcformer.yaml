@@ -3,7 +3,7 @@ name: v2xset_how2comm_stcformer_opv2v
 # validate_dir: '/data/v2xset/validate'
 
 root_dir: '/home/senzeyu2/dataset/opv2v/train'
-validate_dir: '/home/senzeyu2/dataset/opv2v/validate'
+validate_dir: '/home/wang/dataset/opv2v/validate'
 
 wild_setting:
   async: false
