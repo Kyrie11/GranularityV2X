@@ -142,18 +142,21 @@ class PointPillarHow2comm(nn.Module):
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
 
-            vox_bev = batch_dict['vox_bev']
-            #下采样
-            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
-            his_vox.append(vox_bev)
+            if self.delay:
+                vox_bev = batch_dict['vox_bev']
+                # 下采样
+                vox_bev = F.interpoxzdlate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
+                his_vox.append(vox_bev)
 
-            psm = self.cls_head(spatial_features_2d)
-            rm = self.reg_head(spatial_features_2d)
-            # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-            # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
-            # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
-            det_bev = torch.cat([psm, rm], dim=1)
-            his_det.append(det_bev)
+                psm = self.cls_head(spatial_features_2d)
+                rm = self.reg_head(spatial_features_2d)
+                # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
+                # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
+                # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
+                det_bev = torch.cat([psm, rm], dim=1)
+                his_det.append(det_bev)
+
+
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
