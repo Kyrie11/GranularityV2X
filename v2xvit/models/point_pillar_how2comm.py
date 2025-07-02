@@ -147,7 +147,7 @@ class PointPillarHow2comm(nn.Module):
             if self.delay>0:
                 vox_bev = batch_dict['vox_bev']
                 # 下采样
-                vox_bev = F.interpoxzdlate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
+                vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
                 his_vox.append(vox_bev)
 
                 psm = self.cls_head(spatial_features_2d)
