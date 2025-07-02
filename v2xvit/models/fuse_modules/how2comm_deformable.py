@@ -121,7 +121,7 @@ class How2comm(nn.Module):
             vox_bev_copy = curr_vox_bev
             feat_bev_copy = curr_feat_bev
             det_bev_copy = curr_det_bev
-            offset_loss = torch.zeros().to(curr_feat_bev.device)
+            offset_loss = 0
         print("第二次检查feat_bev.shape=", feat_bev_copy.shape)
         #把增强后的ego特征放入
         # 对ego的帧进行增强
