@@ -125,7 +125,7 @@ class How2comm(nn.Module):
         print("第二次检查feat_bev.shape=", feat_bev_copy.shape)
         #把增强后的ego特征放入
         # 对ego的帧进行增强
-        feat_bev_copy = self.get_enhanced_feature(feat_bev_copy, his_feat[1:4], record_len)  # 取第0到第3帧作为历史
+        feat_bev_copy = self.get_enhanced_feature(feat_bev_copy, his_feat[1:-1], record_len)  # 取第0到第3帧作为历史
         print("第三次检查feat_bev.shape=", feat_bev_copy.shape)
 
         fused_feat_list = []
