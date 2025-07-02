@@ -83,7 +83,7 @@ class How2comm(nn.Module):
 
         c_vox = curr_vox_bev.shape[1]
         c_feat = curr_feat_bev.shape[1]
-        if len(his_vox) > 1:
+        if len(his_vox) > 1 and self.delay:
             # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
             comp_F_fused, _, _ = self.mgdc_bev_compensator(his_vox, his_feat, his_det, record_len)
             comp_F_vox = comp_F_fused[:,0:c_vox,:,:]
