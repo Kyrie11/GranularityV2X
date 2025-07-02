@@ -83,7 +83,6 @@ model:
     compression: 0
     backbone_fix: false
     flow_flag: true  
-
     pillar_vfe:
       use_norm: true
       with_distance: false
