@@ -36,8 +36,6 @@ class PointPillarHow2comm(nn.Module):
             self.shrink_conv = DownsampleConv(args['shrink_header'])
         self.compression = False
 
-        self.delay = 0
-
         if args['compression'] > 0:
             self.compression = True
             self.naive_compressor = NaiveCompressor(256, args['compression'])
@@ -100,6 +98,7 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, data_dict_list):
+        delay = 0
         batch_dict_list = []
         feature_2d_list = []
         matrix_list = []
@@ -181,7 +180,7 @@ class PointPillarHow2comm(nn.Module):
                 record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
         elif self.delay > 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, delay=self.delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         print("fused_feat_list.shape=",fused_feature.shape)
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)
