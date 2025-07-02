@@ -114,9 +114,9 @@ class How2comm(nn.Module):
             print("offset_loss=", offset_loss)
             # 把ego-agent的当前帧补偿回去
 
-            vox_bev_copy = comp_F_vox
-            feat_bev_copy = comp_F_feat
-            det_bev_copy = comp_F_det
+            vox_bev_copy = comp_F_vox.clone().detach()
+            feat_bev_copy = comp_F_feat.clone().detach()
+            det_bev_copy = comp_F_det.clone().detach()
         else:
             vox_bev_copy = curr_vox_bev
             feat_bev_copy = curr_feat_bev
