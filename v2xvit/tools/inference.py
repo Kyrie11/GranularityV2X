@@ -8,6 +8,7 @@ import os
 import open3d as o3d
 from torch.utils.data import DataLoader
 
+from v2xvit.data_utils.datasets.intermediate_fusion_dataset import IntermediateFusionDataset
 import v2xvit.hypes_yaml.yaml_utils as yaml_utils
 from v2xvit.tools import train_utils, infrence_utils
 from v2xvit.data_utils.datasets import build_dataset
@@ -68,7 +69,8 @@ def main():
         hypes['wild_setting']['ryp_std'] = opt.ryp_std
 
     print('Dataset Building')
-    opencood_dataset = build_dataset(hypes, visualize=True, train=False)
+    # opencood_dataset = build_dataset(hypes, visualize=True, train=False)
+    opencood_dataset = IntermediateFusionDataset(hypes, visualize=False, train=False)
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
                              num_workers=10,
@@ -108,31 +110,16 @@ def main():
                 torch.cuda.synchronize()
                 batch_data = batch_data_list[0]
                 batch_data = train_utils.to_device(batch_data, device)  
-                batch_data_list = train_utils.to_device(batch_data_list, device)  
-                if opt.fusion_method == 'late':
-                    pred_box_tensor, pred_score, gt_box_tensor = \
-                        infrence_utils.inference_late_fusion(batch_data,
-                                                            model,
-                                                            opencood_dataset)
-                elif opt.fusion_method == 'early':
-                    pred_box_tensor, pred_score, gt_box_tensor = \
-                        infrence_utils.inference_early_fusion(batch_data,
-                                                            model,
-                                                            opencood_dataset)
-                elif opt.fusion_method == 'intermediate':
-                    pred_box_tensor, pred_score, gt_box_tensor = \
-                        infrence_utils.inference_intermediate_fusion(batch_data_list,
-                                                                    model,
-                                                                    opencood_dataset)
-                elif opt.fusion_method == 'intermediate_with_comm':
-                    pred_box_tensor, pred_score, gt_box_tensor, comm_rates = \
-                        infrence_utils.inference_intermediate_fusion_withcomm(batch_data_list,
-                                                                    model,
-                                                                    opencood_dataset)
-                    total_comm_rates.append(comm_rates)
-                else:
-                    raise NotImplementedError('Only early, late and intermediate'
-                                            'fusion is supported.')
+                batch_data_list = train_utils.to_device(batch_data_list, device)
+                output_dict = OrderedDict()
+                batch_data = batch_data_list[0]
+
+                output_dict['ego'] = model(batch_data_list)
+
+                pred_box_tensor, pred_score, gt_box_tensor = \
+                    opencood_dataset.post_process(batch_data,
+                                         output_dict)
+
                 eval_utils.caluclate_tp_fp(pred_box_tensor,
                                         pred_score,
                                         gt_box_tensor,
