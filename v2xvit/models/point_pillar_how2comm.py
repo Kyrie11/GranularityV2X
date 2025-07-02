@@ -187,6 +187,8 @@ class PointPillarHow2comm(nn.Module):
 
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
+        print("commu_loss:", commu_loss)
+        print("offset_loss:", offset_loss)
         output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
         # output_dict = {'psm': psm,
