@@ -161,6 +161,7 @@ def main():
             # as well
             if not opt.half:
                 ouput_dict = model(batch_data_list)
+                print("output_dict:", ouput_dict)
                 final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
