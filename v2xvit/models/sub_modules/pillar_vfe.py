@@ -128,9 +128,7 @@ class PillarVFE(nn.Module):
 
         self.num_bev_features = 8
         self.grid_size_x = round((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0])
-        print("grid_size_x=", self.grid_size_x)
         self.grid_size_y = round((point_cloud_range[4] - point_cloud_range[1]) / voxel_size[1])
-        print("grid_size_y=", self.grid_size_y)
 
     def get_output_feature_dim(self):
         return self.num_filters[-1]
