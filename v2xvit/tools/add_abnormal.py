@@ -6,29 +6,24 @@ import yaml
 from scipy.spatial.transform import Rotation as R
 import random
 
-# --- 1. 配置参数 ---
-
-INPUT_ROOT = "./validate"
-OUTPUT_ROOT = "./validate_with_noise_and_gt"
-
+# --- 1. 配置参数 (与之前相同) ---
+INPUT_ROOT = "/home/senzeyu2/dataset/opv2v/validate"
+OUTPUT_ROOT = "/home/senzeyu2/dataset/opv2v/validate_ab"
 POINT_CLOUD_RANGE = [-140.8, -40, -3, 140.8, 40, 1]
-
 SPAWN_AREA_EGO = {
     'x_range': [10, 50],
     'y_range': [-10, 10],
     'z_range': [-1, 0.5]
 }
-
 ABNORMAL_SIZE_SCALE_RANGE = (0.5, 3.0)
 ABNORMAL_TARGET_NUM_POINTS = 500
-ABNORMAL_TARGET_ID = 99999  # 为异常目标指定一个固定的、易于识别的GT ID
-
+ABNORMAL_TARGET_ID = 99999
 MAX_SPAWN_ATTEMPTS = 50
 COLORIZE_ABNORMAL_TARGET = True
 ABNORMAL_TARGET_COLOR = [1.0, 0.0, 0.0]
 
 
-# --- 2. 辅助函数 (与上一版相同) ---
+# --- 2. 辅助函数 ---
 
 def generate_box_noise(center, extent, rotation_matrix, num_points):
     points = np.random.rand(num_points, 3) - 0.5
@@ -60,16 +55,6 @@ def get_gt_boxes_in_ego_coords(vehicles_data):
     return gt_boxes
 
 
-def check_collision(new_box, existing_boxes):
-    for existing_box in existing_boxes:
-        if new_box.get_axis_aligned_bounding_box().intersects(existing_box.get_axis_aligned_bounding_box()):
-            new_box_vertices = new_box.get_box_points()
-            existing_box_vertices = existing_box.get_box_points()
-            if len(existing_box.get_point_indices_within_bounding_box(new_box_vertices)) > 0: return True
-            if len(new_box.get_point_indices_within_bounding_box(existing_box_vertices)) > 0: return True
-    return False
-
-
 def crop_pcd_by_range(pcd, pcd_range):
     points = np.asarray(pcd.points)
     colors = np.asarray(pcd.colors) if pcd.has_colors() else None
@@ -85,8 +70,44 @@ def crop_pcd_by_range(pcd, pcd_range):
     return cropped_pcd
 
 
-# --- 3. 主处理逻辑 ---
+# vvvvvvvvvvvvvv  修改部分开始 vvvvvvvvvvvvvv
+def check_aabb_intersection(aabb1, aabb2):
+    """
+    手动检查两个轴对齐包围盒(AABB)是否相交。
+    兼容所有Open3D版本。
+    """
+    min1, max1 = aabb1.get_min_bound(), aabb1.get_max_bound()
+    min2, max2 = aabb2.get_min_bound(), aabb2.get_max_bound()
 
+    # 检查在所有三个轴上是否都有重叠
+    x_overlap = (max1[0] >= min2[0]) and (min1[0] <= max2[0])
+    y_overlap = (max1[1] >= min2[1]) and (min1[1] <= max2[1])
+    z_overlap = (max1[2] >= min2[2]) and (min1[2] <= max2[2])
+
+    return x_overlap and y_overlap and z_overlap
+
+
+def check_collision(new_box, existing_boxes):
+    """检查新框是否与现有框重叠 (在同一坐标系下)"""
+    new_aabb = new_box.get_axis_aligned_bounding_box()
+    for existing_box in existing_boxes:
+        existing_aabb = existing_box.get_axis_aligned_bounding_box()
+
+        # 使用我们自己实现的、兼容性好的AABB相交检测
+        if check_aabb_intersection(new_aabb, existing_aabb):
+            # 如果AABB相交，再进行更精确的顶点检查
+            new_box_vertices = new_box.get_box_points()
+            existing_box_vertices = existing_box.get_box_points()
+            if len(existing_box.get_point_indices_within_bounding_box(new_box_vertices)) > 0:
+                return True  # 发生碰撞
+            if len(new_box.get_point_indices_within_bounding_box(existing_box_vertices)) > 0:
+                return True  # 发生碰撞
+    return False  # 未发生碰撞
+
+
+# ^^^^^^^^^^^^^^  修改部分结束 ^^^^^^^^^^^^^^
+
+# --- 3. 主处理逻辑 (与之前相同) ---
 def process_dataset(input_dir, output_dir):
     print(f"开始处理数据集，输入: '{input_dir}', 输出: '{output_dir}'")
 
@@ -116,18 +137,17 @@ def process_dataset(input_dir, output_dir):
                 ego_data = yaml.safe_load(f)
 
             ego_lidar_pose = ego_data.get('lidar_pose')
-            ego_vehicles_data = ego_data.get('vehicles') or {}  # 确保即使没有vehicles, 也是一个空字典
+            ego_vehicles_data = ego_data.get('vehicles') or {}
             if not ego_lidar_pose:
                 print(f"    Ego-Agent {ts}.yaml 缺少 pose 数据，跳过。")
                 continue
 
             gt_boxes_ego = get_gt_boxes_in_ego_coords(ego_vehicles_data)
 
-            # 如果有GT，则根据GT计算平均尺寸，否则使用一个默认尺寸
             if gt_boxes_ego:
                 avg_gt_extent = np.mean(np.array([box.extent for box in gt_boxes_ego]), axis=0)
             else:
-                avg_gt_extent = np.array([4.0, 1.8, 1.5])  # 默认车辆尺寸
+                avg_gt_extent = np.array([4.0, 1.8, 1.5])
 
             abnormal_target_info_ego = None
             for attempt in range(MAX_SPAWN_ATTEMPTS):
@@ -139,7 +159,6 @@ def process_dataset(input_dir, output_dir):
                     random.uniform(*SPAWN_AREA_EGO['z_range']),
                 ])
                 yaw = random.uniform(0, 360)
-                # GT中通常只关心yaw，roll和pitch为0
                 angle = [0.0, 0.0, yaw]
                 rotation = R.from_euler('z', yaw, degrees=True).as_matrix()
 
@@ -150,7 +169,7 @@ def process_dataset(input_dir, output_dir):
                     abnormal_target_info_ego = {
                         'center': center,
                         'extent': extent,
-                        'angle_deg': angle,  # [roll, pitch, yaw] in degrees
+                        'angle_deg': angle,
                         'rotation': rotation
                     }
                     break
@@ -182,55 +201,47 @@ def process_dataset(input_dir, output_dir):
                 T_world_to_current_agent = np.linalg.inv(T_current_agent_to_world)
                 T_ego_to_current_agent = T_world_to_current_agent @ T_ego_to_world
 
-                # 1. 转换点云
                 abnormal_target_ego_h = np.hstack(
                     [abnormal_target_pcd_ego, np.ones((abnormal_target_pcd_ego.shape[0], 1))])
                 abnormal_target_current_agent_h = (T_ego_to_current_agent @ abnormal_target_ego_h.T).T
                 abnormal_target_current_agent = abnormal_target_current_agent_h[:, :3]
 
-                # 2. 转换GT框信息 (center, angle)
                 ego_gt_center_h = np.append(abnormal_target_info_ego['center'], 1)
                 current_gt_center = (T_ego_to_current_agent @ ego_gt_center_h)[:3]
 
                 R_ego_to_current = T_ego_to_current_agent[:3, :3]
                 current_gt_rotation = R_ego_to_current @ abnormal_target_info_ego['rotation']
                 current_gt_angle = R.from_matrix(current_gt_rotation).as_euler('zyx', degrees=True)
-                # 调整顺序为 [roll, pitch, yaw]
                 current_gt_angle_rpy = [current_gt_angle[2], current_gt_angle[1], current_gt_angle[0]]
 
-                # 3. 创建新的GT条目
                 abnormal_gt_entry = {
                     'angle': [float(a) for a in current_gt_angle_rpy],
                     'center': [float(c) for c in current_gt_center],
-                    'extent': [float(e) for e in abnormal_target_info_ego['extent']],  # extent在所有坐标系下都一样
-                    # location 和 speed 可以留空或设为默认值
+                    'extent': [float(e) for e in abnormal_target_info_ego['extent']],
                     'location': [0.0, 0.0, 0.0],
                     'speed': 0.0
                 }
 
-                # 4. 更新YAML数据
                 if 'vehicles' not in current_agent_data or current_agent_data['vehicles'] is None:
                     current_agent_data['vehicles'] = {}
                 current_agent_data['vehicles'][ABNORMAL_TARGET_ID] = abnormal_gt_entry
 
-                # 5. 处理点云
                 original_pcd = o3d.io.read_point_cloud(pcd_path)
                 combined_points = np.vstack([np.asarray(original_pcd.points), abnormal_target_current_agent])
                 new_pcd = o3d.geometry.PointCloud()
                 new_pcd.points = o3d.utility.Vector3dVector(combined_points)
-                # ... (颜色处理逻辑) ...
+
+                # (颜色处理逻辑可以在这里添加)
+
                 final_pcd = crop_pcd_by_range(new_pcd, POINT_CLOUD_RANGE)
 
-                # 6. 保存所有文件
                 output_agent_path = os.path.join(output_dir, scene_name, agent_id)
                 os.makedirs(output_agent_path, exist_ok=True)
 
-                # 保存修改后的YAML
                 output_yaml_path = os.path.join(output_agent_path, f"{ts}.yaml")
                 with open(output_yaml_path, 'w') as f:
                     yaml.dump(current_agent_data, f, default_flow_style=None, sort_keys=False)
 
-                # 保存修改后的PCD
                 output_pcd_path = os.path.join(output_agent_path, f"{ts}.pcd")
                 o3d.io.write_point_cloud(output_pcd_path, final_pcd)
 
