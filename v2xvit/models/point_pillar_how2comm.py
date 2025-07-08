@@ -116,7 +116,10 @@ class PointPillarHow2comm(nn.Module):
                           'voxel_coords': voxel_coords,
                           'voxel_num_points': voxel_num_points,
                           'record_len': record_len}
-            print("voxel_coords:", voxel_coords)
+            print("voxel_coords[0]", voxel_coords[0].max())
+            print("voxel_coords[1]", voxel_coords[1].max())
+            print("voxel_coords[2]", voxel_coords[2].max())
+            print("voxel_coords[3]", voxel_coords[3].max())
             # n, 4 -> n, c encoding voxel feature using point-pillar method
             batch_dict = self.pillar_vfe(batch_dict)
             # n, c -> N, C, H, W
