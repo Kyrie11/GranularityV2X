@@ -98,7 +98,7 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, data_dict_list):
-        delay = 0
+        delay = 1
         batch_dict_list = []
         feature_2d_list = []
         matrix_list = []
@@ -116,6 +116,7 @@ class PointPillarHow2comm(nn.Module):
                           'voxel_coords': voxel_coords,
                           'voxel_num_points': voxel_num_points,
                           'record_len': record_len}
+            print("voxel_coords:", voxel_coords)
             # n, 4 -> n, c encoding voxel feature using point-pillar method
             batch_dict = self.pillar_vfe(batch_dict)
             # n, c -> N, C, H, W
@@ -143,8 +144,9 @@ class PointPillarHow2comm(nn.Module):
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
 
-            if self.delay>0:
+            if delay>0:
                 vox_bev = batch_dict['vox_bev']
+                print("vox_bev.shape=", vox_bev.shape)
                 # 下采样
                 vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
                 his_vox.append(vox_bev)
