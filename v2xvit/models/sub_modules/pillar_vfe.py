@@ -150,6 +150,12 @@ class PillarVFE(nn.Module):
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
 
+        if torch.isnan(coords).any() or torch.isinf(coords).any():
+            print("!!! FATAL: Found NaN or Inf in coords tensor!")
+            print(coords)  # 打印出有问题的coords以供分析
+            # 你可以选择在这里抛出异常，以便立即定位问题
+            raise ValueError("NaN/Inf in coords")
+
         record_len = batch_dict['record_len']
         batch_size = len(record_len)
 
