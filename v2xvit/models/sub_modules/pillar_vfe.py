@@ -242,8 +242,10 @@ class PillarVFE(nn.Module):
             device = voxel_features.device)
 
         batch_indices = coords[:, 0].long()
-        x_indices = coords[:, 3].long()
         y_indices = coords[:, 2].long()
+        x_indices = coords[:, 3].long()
+        y_indices = torch.clamp(y_indices, min=0, max=self.grid_size_y - 1)
+        x_indices = torch.clamp(x_indices, min=0, max=self.grid_size_x - 1)
 
 
         vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
