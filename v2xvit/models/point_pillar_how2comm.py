@@ -108,6 +108,8 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
+            for cav_id, cav_content in origin_data.items():
+                print("cav_id in origin_data:", cav_id)
                 # print("cav_content:", cav_content)
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
