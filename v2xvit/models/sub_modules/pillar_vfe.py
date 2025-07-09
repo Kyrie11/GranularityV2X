@@ -232,6 +232,7 @@ class PillarVFE(nn.Module):
             num_points_norm, mean_intensity, mean_height, max_height,
             height_span, var_x, var_y, var_z
         ], dim=1)
+        print("pillar_bev_features.shape=", pillar_bev_features.shape)
 
         vox_bev = torch.zeros(
             batch_size,
@@ -244,7 +245,7 @@ class PillarVFE(nn.Module):
         x_indices = coords[:, 2].long()
         y_indices = coords[:, 3].long()
 
-        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
+        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features.t()
         batch_dict['vox_bev'] = vox_bev
 
         return batch_dict
