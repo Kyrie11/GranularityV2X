@@ -221,10 +221,7 @@ class PillarVFE(nn.Module):
 
         #点坐标方差
         pillar_points_mean = (points_xyz * mask).sum(dim=1, keepdim=True) / safe_voxel_num_points.view(-1, 1, 1)
-        print("points_mean.shape=", points_mean.shape)
-        print("points_xyz.shape=", points_xyz.shape)
         points_sqr_dist = ((points_xyz - pillar_points_mean)**2 * mask).sum(dim=1) / safe_voxel_num_points.view(-1, 1)
-        print("points_sqr_dist.shape=", points_sqr_dist.shape)
         var_x = points_sqr_dist[:, 0:1]
         var_y = points_sqr_dist[:, 1:2]
         var_z = points_sqr_dist[:, 2:3]
@@ -247,7 +244,7 @@ class PillarVFE(nn.Module):
         x_indices = coords[:, 2].long()
         y_indices = coords[:, 3].long()
 
-        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features.t()
+        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
 
         return batch_dict
