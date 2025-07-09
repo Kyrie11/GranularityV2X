@@ -244,8 +244,8 @@ class PillarVFE(nn.Module):
         batch_indices = coords[:, 0].long()
         y_indices = coords[:, 2].long()
         x_indices = coords[:, 3].long()
-        print("grid_size_y=", self.grid_size_y)
-        print("grid_size_x=", self.grid_size_x)
+
+        batch_indices = torch.clamp(batch_indices, min=0, max=batch_size)
         y_indices = torch.clamp(y_indices, min=0, max=self.grid_size_y - 1)
         x_indices = torch.clamp(x_indices, min=0, max=self.grid_size_x - 1)
 
