@@ -254,8 +254,6 @@ class PillarVFE(nn.Module):
         batch_indices = torch.clamp(batch_indices, min=0, max=batch_size-1)
         # y_indices = torch.clamp(y_indices, min=0, max=self.grid_size_y - 1)
         # x_indices = torch.clamp(x_indices, min=0, max=self.grid_size_x - 1)
-        print("max x is:", x_indices.max())
-        print("max y is:", y_indices.max())
 
         vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
