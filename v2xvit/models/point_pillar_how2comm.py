@@ -108,8 +108,6 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
-            for cav_id, cav_content in origin_data.items():
-                print("cav_id:", cav_id)
                 # print("cav_content:", cav_content)
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
@@ -158,7 +156,7 @@ class PointPillarHow2comm(nn.Module):
                 psm = self.cls_head(spatial_features_2d)
                 rm = self.reg_head(spatial_features_2d)
                 temporal_output_dict = OrderedDict()
-                temporal_output_dict = {'psm': psm, 'rm': rm}
+                temporal_output_dict['ego'] = {'psm': psm, 'rm': rm}
                 pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
                 # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
                 # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
