@@ -1,0 +1,255 @@
+data_augment:
+- ALONG_AXIS_LIST:
+  - x
+  NAME: random_world_flip
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+fusion:
+  args:
+    cur_ego_pose_flag: true
+  core_method: IntermediateFusionDataset
+loss:
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+  core_method: point_pillar_loss
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size:
+  - 10
+  - 20
+model:
+  args:
+    anchor_number: 2
+    backbone_fix: false
+    base_bev_backbone:
+      compression: 0
+      layer_nums: &id002
+      - 3
+      - 4
+      - 5
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters: &id003
+      - 64
+      - 128
+      - 256
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+      resnet: true
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+      voxel_size: &id001
+      - 0.4
+      - 0.4
+      - 4
+    compression: 0
+    flow_flag: true
+    fusion_args:
+      agg_operator:
+        depth: 1
+        embed_pos: None
+        feature_dim: 256
+        hetero: false
+        mode: STCFormer
+        n_head: 8
+        with_scm: false
+        with_spe: false
+      communication:
+        bandwidth: 50
+        compressed_dim: 2
+        compression: 0.5
+        gaussian_smooth:
+          c_sigma: 1.0
+          k_size: 5
+        replace_mode: random
+        replace_ratio: 0.2
+        request_flag: true
+        thre: 0.01
+        voxel_size: *id001
+      communication_flag: true
+      delay: 3
+      downsample_rate: 1
+      dropout_rate: 0
+      frame: 1
+      granularity_trans:
+        C_D: 16
+        C_F: 64
+        C_V: 10
+        bev_h: 100
+        bev_w: 352
+        d_model: 256
+      in_channels: 256
+      layer_nums: *id002
+      mgdc_bev_args:
+        C_D: 16
+        C_F: 64
+        C_V: 10
+        D_hidden: 128
+        delay: 3
+        delay_embedding_dim: 32
+        long_gaps: 3
+        short_frames: 3
+      multi_scale: true
+      n_head: 8
+      num_filters: *id003
+      only_attention: true
+      only_ego: false
+      temporal_fusion:
+        channel:
+        - 64
+        - 128
+        - 256
+        - 256
+        compressed_dim: 2
+        delay: 0
+        gate: false
+        height:
+        - 100
+        - 50
+        - 25
+        - 100
+        hidden_dim:
+        - 64
+        - 128
+        - 256
+        - 256
+        layers: 1
+        n_head: 5
+        rte_ratio: 1
+        width:
+        - 352
+        - 176
+        - 88
+        - 352
+      voxel_size: *id001
+    lidar_range: &id004
+    - -140.8
+    - -40
+    - -3
+    - 140.8
+    - 40
+    - 1
+    max_cav: 5
+    pillar_vfe:
+      num_filters:
+      - 64
+      use_absolute_xyz: true
+      use_norm: true
+      with_distance: false
+    point_pillar_scatter:
+      grid_size: !!python/object/apply:numpy.core.multiarray._reconstruct
+        args:
+        - !!python/name:numpy.ndarray ''
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+        state: !!python/tuple
+        - 1
+        - !!python/tuple
+          - 3
+        - !!python/object/apply:numpy.dtype
+          args:
+          - i8
+          - false
+          - true
+          state: !!python/tuple
+          - 3
+          - <
+          - null
+          - null
+          - null
+          - -1
+          - -1
+          - 0
+        - false
+        - !!binary |
+          wAIAAAAAAADIAAAAAAAAAAEAAAAAAAAA
+      num_features: 64
+    shrink_header:
+      dim:
+      - 256
+      input_dim: 384
+      kernal_size:
+      - 3
+      padding:
+      - 1
+      stride:
+      - 1
+    voxel_size: *id001
+  core_method: point_pillar_how2comm
+name: v2xset_how2comm_stcformer_opv2v
+optimizer:
+  args:
+    eps: 1.0e-10
+    weight_decay: 0.0001
+  core_method: Adam
+  lr: 0.002
+postprocess:
+  anchor_args:
+    D: 1
+    H: 200
+    W: 704
+    cav_lidar_range: *id004
+    feature_stride: 2
+    h: 1.56
+    l: 3.9
+    num: 2
+    r:
+    - 0
+    - 90
+    vd: 4
+    vh: 0.4
+    vw: 0.4
+    w: 1.6
+  core_method: VoxelPostprocessor
+  gt_range: *id004
+  max_num: 100
+  nms_thresh: 0.15
+  order: hwl
+  target_args:
+    neg_threshold: 0.45
+    pos_threshold: 0.6
+    score_threshold: 0.2
+preprocess:
+  args:
+    max_points_per_voxel: 32
+    max_voxel_test: 70000
+    max_voxel_train: 32000
+    voxel_size: *id001
+  cav_lidar_range: *id004
+  core_method: SpVoxelPreprocessor
+root_dir: /home/wang/code/dataset/opv2v/train
+train_params:
+  batch_size: 1
+  epoches: 20
+  eval_freq: 2
+  frame: 1
+  max_cav: 5
+  save_freq: 1
+validate_dir: /home/senzeyu2/dataset/opv2v/validate
+wild_setting:
+  async: false
+  async_overhead: 0
+  backbone_delay: 0
+  data_size: 1.06
+  loc_err: false
+  ryp_std: 0
+  seed: 20
+  transmission_speed: 27
+  xyz_std: 0
+yaml_parser: load_point_pillar_params
