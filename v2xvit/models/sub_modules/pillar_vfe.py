@@ -256,6 +256,7 @@ class PillarVFE(nn.Module):
         # x_indices = torch.clamp(x_indices, min=0, max=self.grid_size_x - 1)
         print("max x is:", x_indices.max())
         print("max y is:", y_indices.max())
+        assert torch.all(batch_indices >= 0), f"Found negative batch indices: {batch_indices[batch_indices < 0]}"
 
         vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
