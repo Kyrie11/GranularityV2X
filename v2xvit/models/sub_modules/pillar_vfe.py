@@ -221,6 +221,8 @@ class PillarVFE(nn.Module):
 
         #点坐标方差
         points_mean = sum_height = (points_xyz*mask).sum(dim=1, keepdim=True) / safe_voxel_num_points
+        print("points_mean.shape=", points_mean.shape)
+        print("points_xyz.shape=", points_xyz.shape)
         points_sqr_dist = ((points_xyz - points_mean)**2 * mask).sum(dim=1) / safe_voxel_num_points.view(-1, 1)
         var_x = points_sqr_dist[:, 0:1]
         var_y = points_sqr_dist[:, 1:2]
