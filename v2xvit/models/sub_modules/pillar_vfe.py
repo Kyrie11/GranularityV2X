@@ -248,5 +248,6 @@ class PillarVFE(nn.Module):
 
         vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
+        print("vox_bev.shape=", vox_bev.shape)
 
         return batch_dict
