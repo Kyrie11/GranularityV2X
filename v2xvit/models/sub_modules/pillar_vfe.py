@@ -220,10 +220,11 @@ class PillarVFE(nn.Module):
         height_span = max_height - min_height
 
         #点坐标方差
-        points_mean = sum_height = (points_xyz*mask).sum(dim=1, keepdim=True) / safe_voxel_num_points
+        pillar_points_mean = (points_xyz * mask).sum(dim=1, keepdim=True) / safe_voxel_num_points.view(-1, 1, 1)
         print("points_mean.shape=", points_mean.shape)
         print("points_xyz.shape=", points_xyz.shape)
-        points_sqr_dist = ((points_xyz - points_mean)**2 * mask).sum(dim=1) / safe_voxel_num_points.view(-1, 1)
+        points_sqr_dist = ((points_xyz - pillar_points_mean)**2 * mask).sum(dim=1) / safe_voxel_num_points.view(-1, 1)
+        print("points_sqr_dist.shape=", points_sqr_dist.shape)
         var_x = points_sqr_dist[:, 0:1]
         var_y = points_sqr_dist[:, 1:2]
         var_z = points_sqr_dist[:, 2:3]
