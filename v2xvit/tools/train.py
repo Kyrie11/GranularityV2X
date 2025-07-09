@@ -159,7 +159,7 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                ouput_dict = model(batch_data_list)
+                ouput_dict = model(batch_data_list, opencood_train_dataset)
                 final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
