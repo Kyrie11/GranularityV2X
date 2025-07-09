@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 from numpy import record
 import torch.nn as nn
 import torch.nn.functional as F
@@ -97,7 +99,7 @@ class PointPillarHow2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, data_dict_list):
+    def forward(self, data_dict_list, dataset):
         delay = 1
         batch_dict_list = []
         feature_2d_list = []
@@ -106,6 +108,9 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
+            for cav_id, cav_content in origin_data.items():
+                print("cav_id:", cav_id)
+                print("cav_content:", cav_content)
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
@@ -152,6 +157,9 @@ class PointPillarHow2comm(nn.Module):
 
                 psm = self.cls_head(spatial_features_2d)
                 rm = self.reg_head(spatial_features_2d)
+                temporal_output_dict = OrderedDict()
+                temporal_output_dict = {'psm': psm, 'rm': rm}
+                pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
                 # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
                 # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
                 # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
@@ -176,10 +184,10 @@ class PointPillarHow2comm(nn.Module):
 
         # fused_his = [his_vox, his_feat, his_det]
 
-        if self.delay == 0:
+        if delay == 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
                 record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
-        elif self.delay > 0:
+        elif delay > 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
                 record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         print("fused_feat_list.shape=",fused_feature.shape)

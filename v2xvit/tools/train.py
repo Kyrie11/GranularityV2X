@@ -165,7 +165,7 @@ def main():
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
-                    ouput_dict = model(batch_data_list)
+                    ouput_dict = model(batch_data_list, opencood_train_dataset)
                     # first argument is always your output dictionary,
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
