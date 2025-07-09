@@ -245,7 +245,7 @@ class PillarVFE(nn.Module):
         x_indices = coords[:, 2].long()
         y_indices = coords[:, 3].long()
 
-        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features.t()
+        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
 
         return batch_dict
