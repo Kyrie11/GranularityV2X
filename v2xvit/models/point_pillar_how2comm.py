@@ -210,7 +210,7 @@ class PointPillarHow2comm(nn.Module):
         psm = output_dict['psm']
         rm  = output_dict['rm']
 
-        anchor_box = dataset.generate_anchor_box()
+        anchor_box = dataset.post_processor.generate_anchor_box()
         anchor_box = anchor_box.to(psm.device)
 
         psm_by_batch = self.regroup(psm, record_len)
