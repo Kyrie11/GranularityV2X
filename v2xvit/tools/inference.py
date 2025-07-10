@@ -115,7 +115,8 @@ def main():
                 batch_data = batch_data_list[0]
 
                 output_dict['ego'] = model(batch_data_list)
-
+                print("output_dict:", output_dict)
+                print("batch_data:", batch_data)
                 pred_box_tensor, pred_score, gt_box_tensor = \
                     opencood_dataset.post_process(batch_data,
                                          output_dict)
