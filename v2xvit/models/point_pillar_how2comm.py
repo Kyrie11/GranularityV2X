@@ -108,11 +108,9 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
-            # transformation_matrix_torch = torch.from_numpy(np.identity(4)).float()
-            # origin_data['ego'].update({'transformation_matrix':
-            #                             transformation_matrix_torch})
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
+            print("origin_data[ego].voxel_features.shape=", voxel_features.shape)
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
