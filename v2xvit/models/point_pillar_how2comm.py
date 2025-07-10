@@ -162,6 +162,7 @@ class PointPillarHow2comm(nn.Module):
                 temporal_output_dict = OrderedDict()
                 temporal_output_dict['ego'] = {'psm': psm, 'rm': rm}
                 pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
+                print("pred_box_tensor:", pred_box_tensor)
                 # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
                 # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
                 # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
