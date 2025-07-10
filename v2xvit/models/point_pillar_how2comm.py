@@ -94,7 +94,7 @@ class PointPillarHow2comm(nn.Module):
         for p in self.reg_head.parameters():
             p.requires_grad = False
 
-    def batched_post_process(self, batched_output_dict, record_len):
+    # def batched_post_process(self, batched_output_dict, record_len):
 
 
     def regroup(self, x, record_len):
