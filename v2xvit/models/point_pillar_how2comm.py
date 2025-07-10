@@ -94,9 +94,6 @@ class PointPillarHow2comm(nn.Module):
         for p in self.reg_head.parameters():
             p.requires_grad = False
 
-    # def batched_post_process(self, batched_output_dict, record_len):
-
-
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
@@ -115,13 +112,13 @@ class PointPillarHow2comm(nn.Module):
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
-            print("voxel_features.shape=", voxel_features.shape)
-            print("voxel_coords.shape=", voxel_coords.shape)
-            print("voxel_num_points.shape=", voxel_num_points.shape)
+            # print("voxel_features.shape=", voxel_features.shape)
+            # print("voxel_coords.shape=", voxel_coords.shape)
+            # print("voxel_num_points.shape=", voxel_num_points.shape)
             record_len = data_dict['record_len']
             batch_size = len(record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
-            print("pairwise_t_matrix.shape=", pairwise_t_matrix.shape)
+            # print("pairwise_t_matrix.shape=", pairwise_t_matrix.shape)
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
                           'voxel_num_points': voxel_num_points,
@@ -162,16 +159,16 @@ class PointPillarHow2comm(nn.Module):
 
                 psm = self.cls_head(spatial_features_2d)
                 rm = self.reg_head(spatial_features_2d)
-                temporal_output_dict = OrderedDict()
-                for batch in range(batch_size):
-                    cav_nums = record_len[batch]
-                    for cav_idx in range(cav_nums):
-                        temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx:cav_idx+1], 'rm': self.regroup(rm, record_len)[batch][cav_idx:cav_idx+1]}
-                        pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
-                        print("pred_box_tensor:", pred_box_tensor.shape)
-                # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
-                # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
-                # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
+                temporal_output_dict = {'psm':psm, 'rm':rm}
+                detections = self.post_process(dataset, temporal_output_dict, record_len)
+                print(detections)
+                # for batch in range(batch_size):
+                #     cav_nums = record_len[batch]
+                #     for cav_idx in range(cav_nums):
+                #         temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx:cav_idx+1], 'rm': self.regroup(rm, record_len)[batch][cav_idx:cav_idx+1]}
+                #         pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
+                #         print("pred_box_tensor:", pred_box_tensor.shape)
+
                 det_bev = torch.cat([psm, rm], dim=1)
                 his_det.append(det_bev)
 
@@ -207,13 +204,52 @@ class PointPillarHow2comm(nn.Module):
         rm = self.reg_head(fused_feature)
         output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
-        # output_dict = {'psm': psm,
-        #                'rm': rm
-        #                }
-        #
-        # # output_dict.update(result_dict)
-        # output_dict.update({'comm_rate': commu_volume,
-        #                     "offset_loss": offset_loss,
-        #                     'commu_loss': commu_loss
-        #                     })
-        # return output_dict
+
+
+    def post_process(self, dataset, output_dict, record_len):
+        psm = output_dict['psm']
+        rm  = output_dict['rm']
+
+        anchor_box = dataset.generate_anchor_box()
+        anchor_box = anchor_box.to(psm.device)
+
+        psm_by_batch = self.regroup(psm, record_len)
+        rm_by_batch = self.regroup(rm, record_len)
+
+        detections_by_batch = []
+        batch_size = len(record_len)
+
+        for i in range(batch_size):
+            num_agents_in_sample = record_len[i]
+            sample_detections = {}
+
+            for j in range(num_agents_in_sample):
+                agent_psm = psm_by_batch[i][j].unsqueeze(0)
+                agent_rm = rm_by_batch[i][j].unsqueeze(0)
+
+                local_boxes, local_scores = self.decode_single_agent_output(psm=agent_psm, rm=agent_rm, anchor_box=anchor_box)
+
+                agent_key = f"agent_{j}"
+                sample_detections[agent_key] = {
+                    'box_tensor': local_boxes,
+                    'score_tensor': local_scores
+                }
+
+            detections_by_batch.append(sample_detections)
+        return detections_by_batch
+
+    def decode_single_agent_output(self, psm, rm, anchor_box):
+        """
+            Decodes the raw output of a single agent into a list of bounding boxes
+            and scores, without any coordinate transformation or NMS.
+        """
+        prob = torch.sigmoid(psm.permute(0, 2, 3, 1))
+        prob = prob.reshape(1, -1)
+        batch_box3d = self.delta_to_boxes3d(rm, anchor_box)
+        mask = torch.gt(prob, self.params['target_args']['score_threshold'])
+        mask = mask.view(1, -1)
+        mask_reg = mask.unsqueeze(2).repeat(1, 1, 7)
+        decoded_boxes = torch.masked_select(batch_box3d[0], mask_reg[0]).view(-1, 7)
+        decoded_scores = torch.masked_select(prob[0], mask[0])
+
+        return decoded_boxes, decoded_scores
