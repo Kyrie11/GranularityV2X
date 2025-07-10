@@ -162,7 +162,7 @@ class PointPillarHow2comm(nn.Module):
                 for batch in range(batch_size):
                     cav_nums = record_len[batch]
                     for cav_idx in range(cav_nums):
-                        temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx:cav_idx+1]}
+                        temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx:cav_idx+1], 'rm': self.regroup(rm, record_len)[batch][cav_idx:cav_idx+1]}
                         pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
                         print("pred_box_tensor:", pred_box_tensor.shape)
                 # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
