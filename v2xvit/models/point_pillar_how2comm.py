@@ -94,6 +94,9 @@ class PointPillarHow2comm(nn.Module):
         for p in self.reg_head.parameters():
             p.requires_grad = False
 
+    def batched_post_process(self, batched_output_dict, record_len):
+
+
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
@@ -112,6 +115,9 @@ class PointPillarHow2comm(nn.Module):
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
+            print("voxel_features.shape=", voxel_features.shape)
+            print("voxel_coords.shape=", voxel_coords.shape)
+            print("voxel_num_points.shape=", voxel_num_points.shape)
             record_len = data_dict['record_len']
             batch_size = len(record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
