@@ -1,6 +1,7 @@
 from collections import OrderedDict
 
 from numpy import record
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from v2xvit.models.sub_modules.pillar_vfe import PillarVFE
@@ -11,7 +12,6 @@ from v2xvit.models.sub_modules.downsample_conv import DownsampleConv
 from v2xvit.models.sub_modules.naive_compress import NaiveCompressor
 from v2xvit.models.fuse_modules.how2comm_deformable import How2comm
 import torch
-
 
 
 def transform_feature(feature_list, delay):
@@ -108,9 +108,9 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
-            for cav_id, cav_content in origin_data.items():
-                print("cav_id in origin_data:", cav_id)
-                # print("cav_content:", cav_content)
+            transformation_matrix_torch = torch.from_numpy(np.identity(4)).float()
+            origin_data['ego'].update({'transformation_matrix':
+                                        transformation_matrix_torch})
             data_dict = origin_data['ego']
             for cav_id, cav_content in data_dict.items():
                 print("cav_id in origin_data:", cav_id)
