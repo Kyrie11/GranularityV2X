@@ -147,7 +147,7 @@ class PointPillarHow2comm(nn.Module):
 
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
-
+            print("spatial_features2d.shape=", spatial_features_2d.shape)
             if delay>0:
                 vox_bev = batch_dict['vox_bev']
                 print("vox_bev.shape=", vox_bev.shape)
