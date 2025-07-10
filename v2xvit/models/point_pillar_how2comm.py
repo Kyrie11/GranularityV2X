@@ -116,6 +116,7 @@ class PointPillarHow2comm(nn.Module):
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
+            batch_size = len(record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
@@ -158,9 +159,12 @@ class PointPillarHow2comm(nn.Module):
                 psm = self.cls_head(spatial_features_2d)
                 rm = self.reg_head(spatial_features_2d)
                 temporal_output_dict = OrderedDict()
-                temporal_output_dict['ego'] = {'psm': psm, 'rm': rm}
-                pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
-                print("pred_box_tensor:", pred_box_tensor.shape)
+                for batch in range(batch_size):
+                    cav_nums = record_len[batch]
+                    for cav_idx in range(cav_nums):
+                        temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx]}
+                        pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
+                        print("pred_box_tensor:", pred_box_tensor.shape)
                 # target_H, target_W = spatial_features.shape[2], spatial_features.shape[3]
                 # psm = F.interpolate(psm, size=(target_H, target_W), mode='bilinear', align_corners=False)
                 # rm = F.interpolate(rm, size=(target_H, target_W), mode="bilinear", align_corners=False)
