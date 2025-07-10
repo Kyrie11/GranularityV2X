@@ -67,6 +67,7 @@ class PointPillarHow2comm(nn.Module):
         self.num_long_frames = 3
         self.long_interval = 3
 
+        self.score_threshold = 0.2
 
 
     def backbone_fix(self):
@@ -246,10 +247,57 @@ class PointPillarHow2comm(nn.Module):
         prob = torch.sigmoid(psm.permute(0, 2, 3, 1))
         prob = prob.reshape(1, -1)
         batch_box3d = self.delta_to_boxes3d(rm, anchor_box)
-        mask = torch.gt(prob, self.params['target_args']['score_threshold'])
+        mask = torch.gt(prob, self.score_threshold)
         mask = mask.view(1, -1)
         mask_reg = mask.unsqueeze(2).repeat(1, 1, 7)
         decoded_boxes = torch.masked_select(batch_box3d[0], mask_reg[0]).view(-1, 7)
         decoded_scores = torch.masked_select(prob[0], mask[0])
 
         return decoded_boxes, decoded_scores
+
+    def delta_to_boxes3d(deltas, anchors):
+        """
+        Convert the output delta to 3d bbx.
+
+        Parameters
+        ----------
+        deltas : torch.Tensor
+            (N, W, L, 14)
+        anchors : torch.Tensor
+            (W, L, 2, 7) -> xyzhwlr
+
+        Returns
+        -------
+        box3d : torch.Tensor
+            (N, W*L*2, 7)
+        """
+        # batch size
+        N = deltas.shape[0]
+        deltas = deltas.permute(0, 2, 3, 1).contiguous().view(N, -1, 7)
+        boxes3d = torch.zeros_like(deltas)
+
+        if deltas.is_cuda:
+            anchors = anchors.cuda()
+            boxes3d = boxes3d.cuda()
+
+        # (W*L*2, 7)
+        anchors_reshaped = anchors.view(-1, 7).float()
+        # the diagonal of the anchor 2d box, (W*L*2)
+        anchors_d = torch.sqrt(
+            anchors_reshaped[:, 4] ** 2 + anchors_reshaped[:, 5] ** 2)
+        anchors_d = anchors_d.repeat(N, 2, 1).transpose(1, 2)
+        anchors_reshaped = anchors_reshaped.repeat(N, 1, 1)
+
+        # Inv-normalize to get xyz
+        boxes3d[..., [0, 1]] = torch.mul(deltas[..., [0, 1]], anchors_d) + \
+                               anchors_reshaped[..., [0, 1]]
+        boxes3d[..., [2]] = torch.mul(deltas[..., [2]],
+                                      anchors_reshaped[..., [3]]) + \
+                            anchors_reshaped[..., [2]]
+        # hwl
+        boxes3d[..., [3, 4, 5]] = torch.exp(
+            deltas[..., [3, 4, 5]]) * anchors_reshaped[..., [3, 4, 5]]
+        # yaw angle
+        boxes3d[..., 6] = deltas[..., 6] + anchors_reshaped[..., 6]
+
+        return boxes3d
