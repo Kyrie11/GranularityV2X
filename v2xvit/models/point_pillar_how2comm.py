@@ -112,8 +112,6 @@ class PointPillarHow2comm(nn.Module):
             # origin_data['ego'].update({'transformation_matrix':
             #                             transformation_matrix_torch})
             data_dict = origin_data['ego']
-            for cav_id, cav_content in data_dict.items():
-                print("cav_id in origin_data:", cav_id)
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
