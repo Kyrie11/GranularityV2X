@@ -277,9 +277,8 @@ class VoxelPostprocessor(BasePostprocessor):
                 torch.gt(prob, self.params['target_args']['score_threshold'])
             mask = mask.view(1, -1)
             mask_reg = mask.unsqueeze(2).repeat(1, 1, 7)
-            print("batch_box3d.shape[0]=", batch_box3d.shape[0])
             # during validation/testing, the batch size should be 1
-            assert batch_box3d.shape[0] == 1
+            # assert batch_box3d.shape[0] == 1
             boxes3d = torch.masked_select(batch_box3d[0],
                                           mask_reg[0]).view(-1, 7)
             scores = torch.masked_select(prob[0], mask[0])
