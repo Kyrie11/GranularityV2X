@@ -255,7 +255,7 @@ class PointPillarHow2comm(nn.Module):
 
         return decoded_boxes, decoded_scores
 
-    def delta_to_boxes3d(deltas, anchors):
+    def delta_to_boxes3d(self, deltas, anchors):
         """
         Convert the output delta to 3d bbx.
 
