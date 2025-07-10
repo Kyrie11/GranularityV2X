@@ -53,7 +53,7 @@ def main():
         train_loader = DataLoader(opencood_train_dataset,
                                   batch_sampler=batch_sampler_train,
                                   num_workers=32,
-                                  collate_fn=opencood_train_dataset.collate_batch_train)
+                                  collate_fn=opencood_train_dataset.collate_batch_test)
         val_loader = DataLoader(opencood_validate_dataset,
                                 sampler=sampler_val,
                                 num_workers=32,

@@ -108,9 +108,9 @@ class PointPillarHow2comm(nn.Module):
         his_feat = []
         his_det = []
         for origin_data in data_dict_list:
-            transformation_matrix_torch = torch.from_numpy(np.identity(4)).float()
-            origin_data['ego'].update({'transformation_matrix':
-                                        transformation_matrix_torch})
+            # transformation_matrix_torch = torch.from_numpy(np.identity(4)).float()
+            # origin_data['ego'].update({'transformation_matrix':
+            #                             transformation_matrix_torch})
             data_dict = origin_data['ego']
             for cav_id, cav_content in data_dict.items():
                 print("cav_id in origin_data:", cav_id)
