@@ -76,13 +76,12 @@ class ContrastiveSparsityLoss(nn.Module):
                 print("decision_mask:", unique_mask.shape)
                 for row in unique_mask_cpu:
                     for decision_val in row:
-                        print("val:", decision_val)
                         if decision_val == 0:
                             continue
                         granularity_idx = decision_val - 1
                         encoder = self.encoder[granularity_idx]
                         anchor_sparse_data = batch_sparse_data[granularity_idx][i:i+1]
-                        q = encoder[granularity_idx](anchor_sparse_data)
+                        q = encoder(anchor_sparse_data)
 
                         # Positive Key: 编码第i个CAV的对应稠密数据
                         k_pos = all_dense_keys[granularity_idx][i:i+1]
