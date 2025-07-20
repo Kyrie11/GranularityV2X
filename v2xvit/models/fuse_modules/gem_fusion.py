@@ -243,7 +243,7 @@ class GEM_Fusion(nn.Module):
 
 class ConvGRUCell(nn.Module):
     def __init__(self, input_dim, hidden_dim, kernel_size, bias=True):
-        super(ConvGRUCell, sellf).__init__()
+        super(ConvGRUCell, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.kernel_size = kernel_size
