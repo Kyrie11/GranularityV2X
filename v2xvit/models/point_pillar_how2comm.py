@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+from cv2.datasets import index
 from numpy import record
 import numpy as np
 import torch.nn as nn
@@ -51,6 +52,7 @@ class PointPillarHow2comm(nn.Module):
         self.downsample_rate = args['fusion_args']['downsample_rate']
         self.multi_scale = args['fusion_args']['multi_scale']
 
+        self.anchor_number = args['anchor_number']
         self.cls_head = nn.Conv2d(128 * 2, args['anchor_number'],
                                   kernel_size=1)
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
@@ -100,7 +102,7 @@ class PointPillarHow2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, data_dict_list, dataset):
+    def forward(self, data_dict_list):
         delay = 1
         batch_dict_list = []
         feature_2d_list = []
@@ -113,13 +115,8 @@ class PointPillarHow2comm(nn.Module):
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
-            # print("voxel_features.shape=", voxel_features.shape)
-            # print("voxel_coords.shape=", voxel_coords.shape)
-            # print("voxel_num_points.shape=", voxel_num_points.shape)
             record_len = data_dict['record_len']
-            batch_size = len(record_len)
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
-            # print("pairwise_t_matrix.shape=", pairwise_t_matrix.shape)
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
                           'voxel_num_points': voxel_num_points,
@@ -150,7 +147,6 @@ class PointPillarHow2comm(nn.Module):
 
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
-            print("spatial_features2d.shape=", spatial_features_2d.shape)
             if delay>0:
                 vox_bev = batch_dict['vox_bev']
                 print("vox_bev.shape=", vox_bev.shape)
@@ -160,43 +156,41 @@ class PointPillarHow2comm(nn.Module):
 
                 psm = self.cls_head(spatial_features_2d)
                 rm = self.reg_head(spatial_features_2d)
-                temporal_output_dict = {'psm':psm, 'rm':rm}
-                detections = self.post_process(dataset, temporal_output_dict, record_len)
-                print(detections)
-                # for batch in range(batch_size):
-                #     cav_nums = record_len[batch]
-                #     for cav_idx in range(cav_nums):
-                #         temporal_output_dict['ego'] = {'psm': self.regroup(psm, record_len)[batch][cav_idx:cav_idx+1], 'rm': self.regroup(rm, record_len)[batch][cav_idx:cav_idx+1]}
-                #         pred_box_tensor, pred_score, _ = dataset.post_process(origin_data, temporal_output_dict)
-                #         print("pred_box_tensor:", pred_box_tensor.shape)
 
-                det_bev = torch.cat([psm, rm], dim=1)
-                his_det.append(det_bev)
+                B, anchor_num, H, W = psm.shape
+                prob = torch.sigmoid(psm)
+                max_probs, best_anchor_indices = torch.max(prob, dim=1)
+                confidence_mask = max_probs > self.score_threshold
+                object_map = torch.zeros(B, 8, H, W, device=psm.device, dtype=psm.dtype)
+                if confidence_mask.any():
+                    object_map[:,0,:,:][confidence_mask] = max_probs[confidence_mask]
+                    rm_reshaped = rm.view(B, anchor_num, 7, H, W)
+                    indices_for_gather = best_anchor_indices.unsqueeze(1).unsqueeze(1).expand(-1,-1,7,-1,-1)
+                    selected_rm = torch.gather(rm_reshaped, dim=1, index=indices_for_gather)
+                    selected_rm = selected_rm.squeeze(1)
+                    expanded_confidence_mask = confidence_mask.unsqueeze(1).expand(-1,7,-1,-1)
+                    object_map[:,1:,:,:][expanded_confidence_mask] = selected_rm[expanded_confidence_mask]
+                # temporal_output_dict = {'psm':psm, 'rm':rm}
+                # detections = self.post_process(dataset, temporal_output_dict, record_len)
+                # det_bev = torch.cat([psm, rm], dim=1)
+                his_det.append(object_map)
 
-
-
-        pairwise_t_matrix = matrix_list[0].clone().detach()
+        pairwise_t_matrix = matrix_list[0]
 
         # spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
-        # psm_single = self.cls_head(spatial_features_2d)
-        # rm_single = self.reg_head(spatial_features_2d)
-        # print("spatial_feature_2d.shape=", spatial_features_2d.shape)
-        # print("spatial_feature.shape=", spatial_features.shape)
-        # print("vox_bev.shape=",vox_bev.shape)
-        # print("det_bev.shape=", det_bev.shape)
 
-
-
-        # fused_his = [his_vox, his_feat, his_det]
+        vox_bev = his_vox[0]
+        feat_bev = his_feat[0]
+        det_bev = his_det[0]
 
         if delay == 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
+                g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix)
         elif delay > 0:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+                g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
         print("fused_feat_list.shape=",fused_feature.shape)
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)

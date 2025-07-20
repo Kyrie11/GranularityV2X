@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import random
 
+from v2xvit.loss.contrastive_sparsity_loss import ContrastiveSparsityLoss
 from v2xvit.loss.recon_loss import ReconstructionLoss
 
 
@@ -209,12 +210,94 @@ class UtilityNetwork(nn.Module):
     def forward(self, fused_attention_maps: torch.Tensor) -> torch.Tensor:
         return self.net(fused_attention_maps)
 
+class QueryGenerator(nn.Module):
+    def __init__(self, feature_channels, query_key_dim):
+        super(QueryGenerator, self).__init__()
 
+        self.query_projector = nn.Conv2d(
+            in_channels=feature_channels,
+            out_channels=query_key_dim,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=False
+        )
+
+    def forward(self, feature_ego):
+        q_ego = self.query_projector(feature_ego)
+        return q_ego
+
+class Channel_Request_Attention(nn.Module):
+    def __init__(self, feature_channels, ratio=16):
+        super(Channel_Request_Attention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveAvgPool2d(1)
+
+        self.sharedMLP = nn.Sequential(
+            nn.Conv2d(feature_channels, feature_channels//ratio, 1, bias=False), nn.ReLU(),
+            nn.Conv2d(feature_channels//ratio, feature_channels, 1, bias=False))
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avgout = self.sharedMLP(self.avg_pool(x))
+        maxout = self.sharedMLP(self.max_pool(x))
+        return self.sigmoid(avgout + maxout)
+
+class KeyGenerator(nn.Module):
+    def __init__(self, g1_channels, g2_channels, g3_channels, query_key_dim):
+        super(KeyGenerator, self).__init__()
+        self.key_projector_g1 = nn.Conv2d(g1_channels, query_key_dim, 1, bias=False)
+        self.key_projector_g2 = nn.Conv2d(g2_channels, query_key_dim, 1, bias=False)
+        self.key_projector_g3 = nn.Conv2d(g3_channels, query_key_dim, 1, bias=False)
+
+    def forward(self, g1_cav, g2_cav, g3_cav):
+        k_g1 = self.key_projector_g1(g1_cav)
+        k_g2 = self.key_projector_g2(g2_cav)
+        k_g3 = self.key_projector_g3(g3_cav)
+
+        return k_g1, k_g2, k_g3
+
+class SemanticDemandAttention(nn.Module):
+    def __init__(self, c_g1, c_g2, c_g3, mid_channels=64):
+        super(SemanticDemandAttention, self).__init__()
+
+        total_in_channels = c_g1 + c_g2 + c_g3 + mid_channels
+        self.fusion_network = nn.Sequential(
+            nn.Conv2d(total_in_channels, mid_channels * 2, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels * 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels * 2, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True)
+        )
+
+        self.demand_head = nn.Sequential(
+            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=1, groups=mid_channels, bias=False),
+            # Depthwise
+            nn.Conv2d(mid_channels, 3, kernel_size=1, bias=False),  # Pointwise, 3 for V, F, R
+            nn.Sigmoid()  # 将每个需求分数归一化到[0, 1]
+        )
+
+    def forward(self, g1_data_list, g2_data_list, g3_data_list):
+        batch_size = len(g1_data_list)
+        demand_profile_list = []
+        for b in range(batch_size):
+            g1_data = g1_data_list[b]
+            g2_data = g2_data_list[b]
+            g3_data = g3_data_list[b]
+            combined_feature = torch.cat([g1_data, g2_data, g3_data], dim=1)
+            fused_feature = self.fusion_network(combined_feature)
+            demand_profile = self.demand_head(fused_feature)
+            demand_profile_list.append(demand_profile)
+        return demand_profile_list
 
 class AdvancedCommunication(nn.Module):
     def __init__(self, c_vox, c_feat, c_det, c_semantic=32, lambda_rec=0.5):
         super(AdvancedCommunication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
+        self.query_generator = QueryGenerator(c_feat, 16)
+        self.channel_query = Channel_Request_Attention(c_feat, 16)
+        self.key_generator = KeyGenerator(c_vox, c_feat, c_det, 16)
         #效益网络
         self.utility_network =UtilityNetwork(c_semantic)
 
@@ -233,6 +316,11 @@ class AdvancedCommunication(nn.Module):
         self.lambda_rec = lambda_rec
         # Using L1 Loss is often better for image-to-image tasks as it's less blurry
         self.reconstruction_loss_fn = nn.L1Loss()
+
+        self.demand_analyzer = SemanticDemandAttention(8,64,8)
+        self.fusion_conv = nn.Sequential(nn.Conv2d(6, 3, kernel_size=3, padding=1, bias=False), nn.ReLU(inplace=True))
+        self.thre = 0.01
+        self.contrastive_sparsity_loss = ContrastiveSparsityLoss(8,64,8)
 
     def unravel_index_single(self, flat_index, shape):
         coords = []
@@ -286,200 +374,78 @@ class AdvancedCommunication(nn.Module):
 
         return utility_gt.detach()
 
-    def forward(self, vox_list,feat_list,det_list):
-        sparse_vox_out, sparse_feat_out, sparse_det_out = [], [], []
-        total_loss = []
-        total_communication_volume = torch.tensor(0, dtype=torch.float, device=vox_list[0].device)
-        for i in range(len(feat_list)):
-            utility_loss = None
-            reconstruction_loss = None
-            vox_i, feat_i, det_i = vox_list[i], feat_list[i], det_list[i]
-
-            num_agents, c_vox, H, W = vox_i.shape
-            c_feat = feat_i.shape[1]
-            c_det = det_i.shape[1]
+    def forward(self, g1_list, g2_list, g3_list):
+        batch_size = len(g1_list)
+        device = g1_list[0].device
+        sparse_g1_out, sparse_g2_out, sparse_g3_out = [], [], []
+        decision_mask_list = []
+        total_commu_volume = []
+        for b in range(batch_size):
+            batch_g1, batch_g2, batch_g3 = g1_list[b], g2_list[b], g3_list[b]
+            num_agents, c_g1, H, W = batch_g1.shape
+            c_g3 = batch_g3.shape[1]
 
             if num_agents <= 1:
                 # If no collaborators, append empty tensors to maintain output structure
-                device = feat_i.device
-                sparse_vox_out.append(vox_i)
-                sparse_feat_out.append(feat_i)
-                sparse_det_out.append(det_i)
-                total_loss.append(torch.tensor(0, dtype=torch.float))
+                sparse_g1_out.append(batch_g1)
+                sparse_g2_out.append(batch_g2)
+                sparse_g3_out.append(batch_g3)
                 continue
 
-            # 1. Separate Ego from Collaborators
-            ego_vox, collab_vox = vox_i[0:1], vox_i[1:]
-            ego_feat, collab_feat = feat_i[0:1], feat_i[1:]
-            ego_det, collab_det = det_i[0:1], det_i[1:]
-            num_collaborators = collab_vox.shape[0]
+            demand_profiles = self.demand_analyzer(batch_g1, batch_g2, batch_g3)
 
-            #计算带宽上限
-            max_possible_volume = H * W * num_collaborators * (c_vox+c_feat+c_det)
-            min_budget = int(0.05 * max_possible_volume)
-            max_budget = int(0.80 * max_possible_volume)
-            min_budget = max(min_budget, torch.max(self.cost_vector).item())
-            if min_budget >= max_budget:
-                current_budget = max_budget
-            else:
-                current_budget = torch.randint(low=min_budget, high=max_budget + 1, size=(1,)).item()
+            ego_need_profile = 1 - demand_profiles[0:1]
 
-            # 2. Generate Attention Maps (The "Common Language")
-            ego_attn_spatial, ego_attn_granularity, ego_attn_semantic = self.attention_generator(ego_vox, ego_feat,
-                                                                                                 ego_det)
-            collab_attn_spatial, collab_attn_granularity, collab_attn_semantic = self.attention_generator(collab_vox,
-                                                                                                          collab_feat,
-                                                                                                          collab_det)
-            collab_attn_granularity = collab_attn_granularity.expand(-1,-1,H,W)
-            # Convert ego's self-attention into a "request" (1 - attention)
-            ego_req_spatial = 1.0 - ego_attn_spatial
-            ego_req_granularity = 1.0 - ego_attn_granularity
+            combined_input = torch.cat([ego_need_profile.expand(num_agents-1, -1,-1,-1), demand_profiles[1:]], dim=1)
+            utility_profiles = self.fusion_conv(combined_input)
 
-            # 3. Prepare Input for the UtilityNetwork
-            # Broadcast ego's requests to match the number of collaborators for concatenation
-            ego_req_s_b = ego_req_spatial.expand(num_collaborators, -1, -1, -1)
-            ego_req_g_b = ego_req_granularity.expand(num_collaborators, -1, H, W)
-            ego_req_sem_b = ego_attn_semantic.expand(num_collaborators, -1, -1, -1)
-            print("————————检测维度——————")
-            print("ego_req_s_b.shape=",ego_req_s_b.shape)
-            print("ego_req_g_b.shape=",ego_req_g_b.shape)
-            print("ego_req_sem_b.shape=",ego_req_sem_b.shape)
-            print("collab_attn_spatial.shape=",collab_attn_spatial.shape)
-            print("collab_attn_granularity.shape=",collab_attn_granularity.shape)
-            print("collab_attn_semantic.shape=",collab_attn_semantic.shape)
-            # Fuse all available information at inference time
-            fused_input = torch.cat([
-                ego_req_s_b, ego_req_g_b, ego_req_sem_b,
-                collab_attn_spatial, collab_attn_granularity, collab_attn_semantic
-            ], dim=1)
+            g1_cost = 8
+            g2_cost = 64
+            g3_cost = 8
+            costs = torch.tensor([g1_cost, g2_cost, g3_cost], device=device).view(1,3,1,1)
 
-            # 4. Predict Utility
-            predicted_utility = self.utility_network(fused_input)
+            alpha_g1 = 0.01
+            alpha_g2 = 0.01
+            alpha_g3 = 0.01
+            alphas = torch.tensor([alpha_g1, alpha_g2, alpha_g3], device=device).view(1,3,1,1)
 
-            # 5. Compute Loss (only during training)
-            # if self.training:
-            #     # Use privileged information to calculate the "perfect" GT
-            #     utility_gt = self._calculate_marginal_utility_gt(
-            #         (ego_vox, ego_feat, ego_det),
-            #         (collab_vox, collab_feat, collab_det),
-            #         (ego_req_spatial, ego_req_granularity, ego_attn_semantic),
-            #         collab_attn_semantic
-            #     )
-            #     utility_loss = F.mse_loss(predicted_utility, utility_gt)
+            net_utilities = utility_profiles - alphas * costs
+            max_net_utility, best_granularity_idx = torch.max(net_utilities, dim=1) #两个shape都是[N-1,H,W]
 
-            utility_gt = self._calculate_marginal_utility_gt(
-                (ego_vox, ego_feat, ego_det),
-                (collab_vox, collab_feat, collab_det),
-                (ego_req_spatial, ego_req_granularity, ego_attn_semantic),
-                collab_attn_semantic
-            )
-            utility_loss = F.mse_loss(predicted_utility, utility_gt)
-
-            # 6. Top-K Selection based on Predicted Utility and Budget
-            final_utility = predicted_utility
-            best_utility_per_patch, best_granularity_idx = torch.max(final_utility, dim=1)
-
-            # Flatten for efficient sorting
-            flat_utility = best_utility_per_patch.flatten()
-            flat_costs = self.cost_vector[best_granularity_idx.flatten()]
-
-            # Sort patches by their predicted utility-per-cost
-            # Adding a small epsilon to cost to avoid division by zero, though cost should be > 0
-            sorted_indices = torch.argsort(flat_utility / (flat_costs + 1e-8), descending=True)
-
-            # Greedily build the transmission mask
-            transmission_mask = torch.zeros_like(final_utility, dtype=torch.bool)
-            bandwidth_accumulator = 0
-
-            for idx in sorted_indices:
-                cost = flat_costs[idx]
-                if bandwidth_accumulator + cost > current_budget:
-                    continue
-
-                bandwidth_accumulator += cost
-                # Convert flat index back to multi-dimensional coordinates
-                coords = self.unravel_index_single(idx.item(), best_utility_per_patch.shape)
-                collab_idx, h_idx, w_idx = coords
-                granularity_to_transmit = best_granularity_idx[coords]
-                transmission_mask[collab_idx, granularity_to_transmit, h_idx, w_idx] = True
-
-            sparse_vox_i = collab_vox * transmission_mask[:, 0:1, :, :]
-            sparse_feat_i = collab_feat * transmission_mask[:, 1:2, :, :]
-            sparse_det_i = collab_det * transmission_mask[:, 2:3, :, :]
+            decision_map = best_granularity_idx + 1
+            decision_map[max_net_utility < self.thre] = 0 #[0:不通信，1:g1, 2:g2, 3:g3] [N-1,H,W]
+            decision_mask_list.append(decision_map)
+            # decision_map[max_net_utility < self.thre] = 0
 
 
-            # if self.training:
-            #     num_collaborators = collab_vox.shape[0]
-            #     # Ego's BEVs need to be broadcasted to match the number of collaborators
-            #     ego_vox_b = ego_vox.expand(num_collaborators, -1, -1, -1)
-            #     ego_feat_b = ego_feat.expand(num_collaborators, -1, -1, -1)
-            #     ego_det_b = ego_det.expand(num_collaborators, -1, -1, -1)
-            #
-            #     # Reconstruct each granularity
-            #     recon_vox = self.decoder_vox(ego_vox_b, sparse_vox_i)
-            #     recon_feat = self.decoder_feat(ego_feat_b, sparse_feat_i)
-            #     recon_det = self.decoder_det(ego_det_b, sparse_det_i)
-            #
-            #     # Calculate loss against the ORIGINAL collaborator BEVs
-            #     loss_vox = self.reconstruction_loss_fn(recon_vox, collab_vox)
-            #     loss_feat = self.reconstruction_loss_fn(recon_feat, collab_feat)
-            #     loss_det = self.reconstruction_loss_fn(recon_det, collab_det)
-            #
-            #     reconstruction_loss = loss_vox + loss_feat + loss_det
+            g1_decision_mask = decision_map == 1 #[N,H,W]
+            g2_decision_mask = decision_map == 2
+            g3_decision_mask = decision_map == 3
 
-            num_collaborators = collab_vox.shape[0]
-            # Ego's BEVs need to be broadcasted to match the number of collaborators
-            ego_vox_b = ego_vox.expand(num_collaborators, -1, -1, -1)
-            ego_feat_b = ego_feat.expand(num_collaborators, -1, -1, -1)
-            ego_det_b = ego_det.expand(num_collaborators, -1, -1, -1)
+            g1_decision_mask = g1_decision_mask.unsqueeze(1)
+            g2_decision_mask = g2_decision_mask.unsqueeze(1)
+            g3_decision_mask = g3_decision_mask.unsqueeze(1)
 
-            # Reconstruct each granularity
-            recon_vox = self.decoder_vox(ego_vox_b, sparse_vox_i)
-            recon_feat = self.decoder_feat(ego_feat_b, sparse_feat_i)
-            recon_det = self.decoder_det(ego_det_b, sparse_det_i)
+            sparse_g1 = g1_decision_mask * batch_g1[1:]
+            sparse_g2 = g2_decision_mask * batch_g2[1:]
+            sparse_g3 = g3_decision_mask * batch_g3[1:]
 
-            # Calculate loss against the ORIGINAL collaborator BEVs
-            loss_vox = self.reconstruction_loss_fn(recon_vox, collab_vox)
-            loss_feat = self.reconstruction_loss_fn(recon_feat, collab_feat)
-            loss_det = self.reconstruction_loss_fn(recon_det, collab_det)
+            sparse_g1 = torch.cat([batch_g1[0:1], sparse_g1], dim=0)
+            sparse_g2 = torch.cat([batch_g2[0:1], sparse_g2], dim=0)
+            sparse_g3 = torch.cat([batch_g3[0:1], sparse_g3], dim=0)
 
-            reconstruction_loss = loss_vox + loss_feat + loss_det
+            sparse_g1_out.append(sparse_g1)
+            sparse_g2_out.append(sparse_g2)
+            sparse_g3_out.append(sparse_g3)
 
-            # 把ego的数据拼接回去
-            sparse_vox_i = torch.cat((ego_vox, sparse_vox_i), dim=0)
-            sparse_feat_i = torch.cat((ego_feat, sparse_feat_i), dim=0)
-            sparse_det_i = torch.cat((ego_det, sparse_det_i), dim=0)
-            # 7. Apply Mask to Generate Sparse Features
-            sparse_vox_out.append(sparse_vox_i)
-            sparse_feat_out.append(sparse_feat_i)
-            sparse_det_out.append(sparse_det_i)
-
-            #计算通信量
-            cost_reshaped = self.cost_vector.view(1, 3, 1, 1)
-            volume_map = torch.tensor(transmission_mask.float()*cost_reshaped, dtype=torch.float, device=vox_list[0].device)
-            total_communication_volume += torch.sum(volume_map)
-
-            # if self.training:
-            #     utility_loss = utility_loss if utility_loss is not None else 0
-            #     reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
-            #
-            #     combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
-            #     total_loss.append(combined_loss)
-            utility_loss = utility_loss if utility_loss is not None else 0
-            reconstruction_loss = reconstruction_loss if reconstruction_loss is not None else 0
-
-            combined_loss = utility_loss + self.lambda_rec * reconstruction_loss
-            print("combined_loss=", combined_loss)
-            total_loss.append(combined_loss)
-
-        # 8. Aggregate batch results and return
-        # final_loss = torch.mean(torch.stack(total_loss)) if self.training and total_loss else None
-        final_loss = torch.mean(torch.stack(total_loss))
-
-        mean_communication_volume = total_communication_volume/len(vox_list)
-
-        return (torch.cat(sparse_vox_out, dim=0),
-                torch.cat(sparse_feat_out, dim=0),
-                torch.cat(sparse_det_out, dim=0),
-                final_loss,
+            commu_volume = g1_decision_mask.sum() + g2_decision_mask.sum() + g3_decision_mask.sum()
+            total_commu_volume.append(commu_volume)
+        sparse_data = [sparse_g1_out, sparse_g2_out, sparse_g3_out]
+        dense_data = [g1_list, g2_list, g3_list]
+        loss = self.contrastive_sparsity_loss(sparse_data, dense_data, decision_mask_list)
+        mean_communication_volume = torch.mean(torch.stack(total_commu_volume))
+        return (torch.cat(sparse_g1_out, dim=0),
+                torch.cat(sparse_g2_out, dim=0),
+                torch.cat(sparse_g3_out, dim=0),
+                loss,
                 mean_communication_volume)
