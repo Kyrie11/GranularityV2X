@@ -171,7 +171,7 @@ class PointPillarHow2comm(nn.Module):
             # det_bev = torch.cat([psm, rm], dim=1)
             his_det.append(object_map)
 
-        pairwise_t_matrix = matrix_list[0]
+        pairwise_t_matrix = matrix_list[0].clone().detach()
 
         # spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
