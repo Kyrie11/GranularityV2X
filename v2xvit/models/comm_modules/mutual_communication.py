@@ -278,21 +278,11 @@ class SemanticDemandAttention(nn.Module):
             nn.Sigmoid()  # 将每个需求分数归一化到[0, 1]
         )
 
-    def forward(self, g1_data_list, g2_data_list, g3_data_list):
-        batch_size = len(g1_data_list)
-        demand_profile_list = []
-        for b in range(batch_size):
-            g1_data = g1_data_list[b]
-            g2_data = g2_data_list[b]
-            g3_data = g3_data_list[b]
-            print("g1_data.shape=", g1_data.shape)
-            print("g2_data.shape=", g2_data.shape)
-            print("g3_data.shape=", g3_data.shape)
-            combined_feature = torch.cat([g1_data, g2_data, g3_data], dim=1)
-            fused_feature = self.fusion_network(combined_feature)
-            demand_profile = self.demand_head(fused_feature)
-            demand_profile_list.append(demand_profile)
-        return demand_profile_list
+    def forward(self, g1_data, g2_data, g3_data):
+        combined_feature = torch.cat([g1_data, g2_data, g3_data], dim=1)
+        fused_feature = self.fusion_network(combined_feature)
+        demand_profile = self.demand_head(fused_feature)
+        return demand_profile
 
 class AdvancedCommunication(nn.Module):
     def __init__(self, c_vox, c_feat, c_det, c_semantic=32, lambda_rec=0.5):
