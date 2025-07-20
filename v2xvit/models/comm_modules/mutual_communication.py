@@ -285,6 +285,9 @@ class SemanticDemandAttention(nn.Module):
             g1_data = g1_data_list[b]
             g2_data = g2_data_list[b]
             g3_data = g3_data_list[b]
+            print("g1_data.shape=", g1_data.shape)
+            print("g2_data.shape=", g2_data.shape)
+            print("g3_data.shape=", g3_data.shape)
             combined_feature = torch.cat([g1_data, g2_data, g3_data], dim=1)
             fused_feature = self.fusion_network(combined_feature)
             demand_profile = self.demand_head(fused_feature)
