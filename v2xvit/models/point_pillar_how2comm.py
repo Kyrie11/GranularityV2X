@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from v2xvit.models.sub_modules.pillar_vfe import PillarVFE
@@ -7,7 +8,7 @@ from v2xvit.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone
 from v2xvit.models.sub_modules.downsample_conv import DownsampleConv
 from v2xvit.models.sub_modules.naive_compress import NaiveCompressor
 from v2xvit.models.fuse_modules.how2comm_deformable import How2comm
-import torch
+
 
 
 def transform_feature(feature_list, delay):
@@ -142,33 +143,33 @@ class PointPillarHow2comm(nn.Module):
 
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
-            if delay>0:
-                vox_bev = batch_dict['vox_bev']
-                print("vox_bev.shape=", vox_bev.shape)
-                # 下采样
-                vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
-                his_vox.append(vox_bev)
 
-                psm = self.cls_head(spatial_features_2d)
-                rm = self.reg_head(spatial_features_2d)
+            vox_bev = batch_dict['vox_bev']
+            print("vox_bev.shape=", vox_bev.shape)
+            # 下采样
+            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
+            his_vox.append(vox_bev)
 
-                B, anchor_num, H, W = psm.shape
-                prob = torch.sigmoid(psm)
-                max_probs, best_anchor_indices = torch.max(prob, dim=1)
-                confidence_mask = max_probs > self.score_threshold
-                object_map = torch.zeros(B, 8, H, W, device=psm.device, dtype=psm.dtype)
-                if confidence_mask.any():
-                    object_map[:,0,:,:][confidence_mask] = max_probs[confidence_mask]
-                    rm_reshaped = rm.view(B, anchor_num, 7, H, W)
-                    indices_for_gather = best_anchor_indices.unsqueeze(1).unsqueeze(1).expand(-1,-1,7,-1,-1)
-                    selected_rm = torch.gather(rm_reshaped, dim=1, index=indices_for_gather)
-                    selected_rm = selected_rm.squeeze(1)
-                    expanded_confidence_mask = confidence_mask.unsqueeze(1).expand(-1,7,-1,-1)
-                    object_map[:,1:,:,:][expanded_confidence_mask] = selected_rm[expanded_confidence_mask]
-                # temporal_output_dict = {'psm':psm, 'rm':rm}
-                # detections = self.post_process(dataset, temporal_output_dict, record_len)
-                # det_bev = torch.cat([psm, rm], dim=1)
-                his_det.append(object_map)
+            psm = self.cls_head(spatial_features_2d)
+            rm = self.reg_head(spatial_features_2d)
+
+            B, anchor_num, H, W = psm.shape
+            prob = torch.sigmoid(psm)
+            max_probs, best_anchor_indices = torch.max(prob, dim=1)
+            confidence_mask = max_probs > self.score_threshold
+            object_map = torch.zeros(B, 8, H, W, device=psm.device, dtype=psm.dtype)
+            if confidence_mask.any():
+                object_map[:,0,:,:][confidence_mask] = max_probs[confidence_mask]
+                rm_reshaped = rm.view(B, anchor_num, 7, H, W)
+                indices_for_gather = best_anchor_indices.unsqueeze(1).unsqueeze(1).expand(-1,-1,7,-1,-1)
+                selected_rm = torch.gather(rm_reshaped, dim=1, index=indices_for_gather)
+                selected_rm = selected_rm.squeeze(1)
+                expanded_confidence_mask = confidence_mask.unsqueeze(1).expand(-1,7,-1,-1)
+                object_map[:,1:,:,:][expanded_confidence_mask] = selected_rm[expanded_confidence_mask]
+            # temporal_output_dict = {'psm':psm, 'rm':rm}
+            # detections = self.post_process(dataset, temporal_output_dict, record_len)
+            # det_bev = torch.cat([psm, rm], dim=1)
+            his_det.append(object_map)
 
         pairwise_t_matrix = matrix_list[0]
 
