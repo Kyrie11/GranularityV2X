@@ -115,7 +115,7 @@ class PointPillarHow2comm(nn.Module):
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
-                          'voxel_num_points': voxel_num_points,
+                              'voxel_num_points': voxel_num_points,
                           'record_len': record_len}
             print("voxel_features.shape=", voxel_features.shape)
             print("voxel_coords.shape=", voxel_coords.shape)

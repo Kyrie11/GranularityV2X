@@ -15,14 +15,6 @@ class PointPillarScatter(nn.Module):
         pillar_features, coords = batch_dict['pillar_features'], batch_dict[
             'voxel_coords']
 
-        raw_points = batch_dict['voxel_features'][:, :, :4] #原始点云，保存x,y,z,intensity
-        #将原始点云按体素索引关联到BEV网格
-        batch_dict['raw_points_mapped'] = {
-            'coords': coords,  #体素坐标[num_voxels,4] (batch_idx, z, y, x)
-            'raw_points': raw_points #原始点云 [num_voxels, max_pts_per_voxel, 4]
-        }
-
-
         batch_spatial_features = []
         batch_size = coords[:, 0].max().int().item() + 1
 

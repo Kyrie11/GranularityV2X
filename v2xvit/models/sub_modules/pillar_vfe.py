@@ -191,25 +191,25 @@ class PillarVFE(nn.Module):
         # vox_bev = scatter(features, coords)
         # batch_dict['vox_bev'] = vox_bev
 
-        voxel_count = features.shape[1]
-        mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
-                                           axis=0)
-        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
+
+
+
         features *= mask
         for pfn in self.pfn_layers:
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
 
+        voxel_count = features.shape[1]
         #点数(num of points)
         num_points_norm = voxel_num_points.view(-1, 1).float() / voxel_count
         #为了安全的除法， 防止体素中点数为0
         safe_voxel_num_points = voxel_num_points.view(-1, 1).float().clamp(min=1.0)
-
         #提取x,y,z,intensity
         points_xyz = voxel_features[:, :, :3]
         points_intensity = voxel_features[:, :, 3:4]
-
+        mask = self.get_paddings_indicator(voxel_num_points, voxel_count, axis=0)
+        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
         #平均激光雷达强度
         sum_intensity = (points_intensity * mask).sum(dim=1)
         mean_intensity = sum_intensity / safe_voxel_num_points
@@ -220,7 +220,6 @@ class PillarVFE(nn.Module):
 
         #最高点高度
         max_height = (points_xyz[:,:,2:3] * mask+(1-mask)*-1e6).max(dim=1)[0]
-
         #高度跨度(Height Span)
         min_height = (points_xyz[:, :, 2:3] * mask + (1 - mask) * 1e6).min(dim=1)[0]
         height_span = max_height - min_height
@@ -240,21 +239,19 @@ class PillarVFE(nn.Module):
         ], dim=1)
         # print("pillar_bev_features.shape=", pillar_bev_features.shape)
 
+        total_num_agents = coords[:,0].max().int().item() + 1
         vox_bev = torch.zeros(
-            batch_size,
+            total_num_agents,
             self.num_bev_features,
             self.grid_size_y,
             self.grid_size_x,
             device = voxel_features.device)
 
-        batch_indices = coords[:, 0].long()
+        agent_indices = coords[:, 0].long()
         y_indices = coords[:, 2].long()
         x_indices = coords[:, 3].long()
-        batch_indices = torch.clamp(batch_indices, min=0, max=batch_size-1)
-        # y_indices = torch.clamp(y_indices, min=0, max=self.grid_size_y - 1)
-        # x_indices = torch.clamp(x_indices, min=0, max=self.grid_size_x - 1)
 
-        vox_bev[batch_indices, :, y_indices, x_indices] = pillar_bev_features
+        vox_bev[agent_indices, :, y_indices, x_indices] = pillar_bev_features
         batch_dict['vox_bev'] = vox_bev
         # print("vox_bev.shape=", vox_bev.shape)
 
