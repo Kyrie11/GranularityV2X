@@ -72,61 +72,62 @@ class ContrastiveSparsityLoss(nn.Module):
                 all_dense_keys = [dense_g1_keys, dense_g2_keys, dense_g3_keys]
             for i in range(1,  cav_num):
                 unique_mask = decision_mask[i-1,:,:]
+                unique_mask_cpu = unique_mask.cpu()
                 print("decision_mask:", unique_mask.shape)
-                for decision in unique_mask:
-                    print("decision:", decision)
-                    decision_val = decision.item()
-                    if decision_val == 0:
-                        continue
-                    granularity_idx = decision_val - 1
-                    encoder = self.encoder[granularity_idx]
-                    anchor_sparse_data = batch_sparse_data[granularity_idx][i:i+1]
-                    q = encoder[granularity_idx](anchor_sparse_data)
-
-                    # Positive Key: 编码第i个CAV的对应稠密数据
-                    k_pos = all_dense_keys[granularity_idx][i:i+1]
-
-                    #构建负样本集
-                    # a) 跨智能体负样本 (Inter-Agent Negatives)
-                    # 对于当前粒度，其他所有CAV的稠密数据都是负样本
-                    neg_keys_list = []
-                    agent_indices = list(range(cav_num))
-                    agent_indices.pop(i)
-                    inter_agent_neg = all_dense_keys[granularity_idx][agent_indices]
-                    neg_keys_list.append(inter_agent_neg)
-                    # b) 跨粒度负样本 (Inter-Granularity Negatives)
-                    # 对于当前CAV，其他所有粒度的稠密数据都是负样本
-                    for other_gran_idx in range(3):
-                        if other_gran_idx == granularity_idx:
+                for row in unique_mask_cpu:
+                    for decision_val in row:
+                        print("val:", decision_val)
+                        if decision_val == 0:
                             continue
-                        inter_agent_neg = all_dense_keys[other_gran_idx][i:i+1]
+                        granularity_idx = decision_val - 1
+                        encoder = self.encoder[granularity_idx]
+                        anchor_sparse_data = batch_sparse_data[granularity_idx][i:i+1]
+                        q = encoder[granularity_idx](anchor_sparse_data)
+
+                        # Positive Key: 编码第i个CAV的对应稠密数据
+                        k_pos = all_dense_keys[granularity_idx][i:i+1]
+
+                        #构建负样本集
+                        # a) 跨智能体负样本 (Inter-Agent Negatives)
+                        # 对于当前粒度，其他所有CAV的稠密数据都是负样本
+                        neg_keys_list = []
+                        agent_indices = list(range(cav_num))
+                        agent_indices.pop(i)
+                        inter_agent_neg = all_dense_keys[granularity_idx][agent_indices]
                         neg_keys_list.append(inter_agent_neg)
+                        # b) 跨粒度负样本 (Inter-Granularity Negatives)
+                        # 对于当前CAV，其他所有粒度的稠密数据都是负样本
+                        for other_gran_idx in range(3):
+                            if other_gran_idx == granularity_idx:
+                                continue
+                            inter_agent_neg = all_dense_keys[other_gran_idx][i:i+1]
+                            neg_keys_list.append(inter_agent_neg)
 
-                    if not neg_keys_list:
-                        continue
+                        if not neg_keys_list:
+                            continue
 
-                    # ------ 计算InfoNCE损失 ------
-                    k_neg = torch.cat(neg_keys_list, dim=0) #[N,D]
-                    # L2-normalize all vectors
-                    q = F.normalize(q, dim=1)
-                    k_pos = F.normalize(k_pos, dim=1)
-                    k_neg = F.normalize(k_neg, dim=1)
+                        # ------ 计算InfoNCE损失 ------
+                        k_neg = torch.cat(neg_keys_list, dim=0) #[N,D]
+                        # L2-normalize all vectors
+                        q = F.normalize(q, dim=1)
+                        k_pos = F.normalize(k_pos, dim=1)
+                        k_neg = F.normalize(k_neg, dim=1)
 
-                    # 计算正样本相似度
-                    l_pos = torch.einsum('bd,bd->b', q, k_pos)  # Shape: [1]
-                    # 计算负样本相似度
-                    l_neg = torch.einsum('bd,nd->bn', q, k_neg)  # Shape: [1, N_neg]
-                    # 拼接成logits
-                    logits = torch.cat([l_pos.unsqueeze(1), l_neg], dim=1)  # Shape: [1, 1 + N_neg]
-                    # 应用温度系数
-                    logits /= self.temperature
+                        # 计算正样本相似度
+                        l_pos = torch.einsum('bd,bd->b', q, k_pos)  # Shape: [1]
+                        # 计算负样本相似度
+                        l_neg = torch.einsum('bd,nd->bn', q, k_neg)  # Shape: [1, N_neg]
+                        # 拼接成logits
+                        logits = torch.cat([l_pos.unsqueeze(1), l_neg], dim=1)  # Shape: [1, 1 + N_neg]
+                        # 应用温度系数
+                        logits /= self.temperature
 
-                    # 标签永远是第0个（正样本）
-                    # 我们只有一个查询，所以batch_size是1
-                    labels = torch.zeros(1, dtype=torch.long, device=q.device)
+                        # 标签永远是第0个（正样本）
+                        # 我们只有一个查询，所以batch_size是1
+                        labels = torch.zeros(1, dtype=torch.long, device=q.device)
 
-                    loss = self.criterion(logits, labels)
-                    total_loss.append(loss)
+                        loss = self.criterion(logits, labels)
+                        total_loss.append(loss)
             if not total_loss:
                 return torch.tensor(0.0, device=device)
 
