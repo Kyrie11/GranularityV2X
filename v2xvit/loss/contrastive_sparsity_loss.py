@@ -72,7 +72,7 @@ class ContrastiveSparsityLoss(nn.Module):
                 all_dense_keys = [dense_g1_keys, dense_g2_keys, dense_g3_keys]
             for i in range(1,  cav_num):
                 unique_mask = decision_mask[i-1,:,:]
-                print("decision_mask:", unique_mask)
+                print("decision_mask:", unique_mask.shape)
                 for decision in unique_mask:
                     print("decision:", decision)
                     decision_val = decision.item()
