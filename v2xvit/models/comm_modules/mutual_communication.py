@@ -261,7 +261,7 @@ class SemanticDemandAttention(nn.Module):
     def __init__(self, c_g1, c_g2, c_g3, mid_channels=64):
         super(SemanticDemandAttention, self).__init__()
 
-        total_in_channels = c_g1 + c_g2 + c_g3 + mid_channels
+        total_in_channels = c_g1 + c_g2 + c_g3
         self.fusion_network = nn.Sequential(
             nn.Conv2d(total_in_channels, mid_channels * 2, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(mid_channels * 2),
