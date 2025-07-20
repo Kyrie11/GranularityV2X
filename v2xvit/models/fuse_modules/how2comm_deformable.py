@@ -144,6 +144,8 @@ class How2comm(nn.Module):
                 t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
 
                 temp_g1_data = batch_temp_g1_data[b]
+                print("temp_g1_data.shape=", temp_g1_data.shape)
+                print("t_matrix.shape=", t_matrix.shape)
                 C,H,W = temp_g1_data.shape[1:]
                 neighbor_g1_data = warp_affine_simple(temp_g1_data, t_matrix[0,:,:,:], (H,W))
                 temp_g1_list.append(neighbor_g1_data)
