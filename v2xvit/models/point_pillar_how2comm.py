@@ -103,7 +103,7 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, data_dict_list):
-        delay = 1
+        delay = 0
         batch_dict_list = []
         feature_2d_list = []
         matrix_list = []

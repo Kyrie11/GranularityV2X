@@ -183,8 +183,6 @@ def main():
                 scaler.scale(final_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
-
-            model.fusion_net.detach
         if epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
