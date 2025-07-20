@@ -121,7 +121,7 @@ class How2comm(nn.Module):
             g1_data = curr_g1_data
             g2_data = curr_g2_data
             g3_data = curr_g3_data
-            delay_loss = torch.zeros()
+            delay_loss = 0
         print("第二次检查feat_bev.shape=", g2_data.shape)
         #把增强后的ego特征放入
         # 对ego的帧进行增强
