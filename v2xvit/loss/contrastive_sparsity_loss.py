@@ -68,7 +68,7 @@ class ContrastiveSparsityLoss(nn.Module):
             with torch.no_grad():
                 dense_g1_keys = self.g1_encoder(batch_dense_g1)
                 dense_g2_keys = self.g2_encoder(batch_dense_g2)
-                dense_g3_keys = self.g2_encoder(batch_dense_g3)
+                dense_g3_keys = self.g3_encoder(batch_dense_g3)
                 all_dense_keys = [dense_g1_keys, dense_g2_keys, dense_g3_keys]
             for i in range(1,  cav_num):
                 unique_mask = decision_mask[i-1]
