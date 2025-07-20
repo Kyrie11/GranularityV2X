@@ -95,6 +95,7 @@ class How2comm(nn.Module):
         device = g2_data.device
         print("第一次检查feat_bev.shape=", curr_g2_data.shape)
         _, _, H, W = curr_g2_data.shape
+
         B, L = pairwise_t_matrix.shape[:2]
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
                                                            0, 1], :][:, :, :, :, [0, 1, 3]]
@@ -104,6 +105,11 @@ class How2comm(nn.Module):
         2] / (self.downsample_rate * self.discrete_ratio * W) * 2
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
+
+        for b in range(B):
+            N = record_len[b]
+            t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
+            print("t_matrix.shape=", t_matrix.shape)
 
 
         if short_his and long_his:
