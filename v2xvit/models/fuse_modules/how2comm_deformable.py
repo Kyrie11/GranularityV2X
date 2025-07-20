@@ -109,7 +109,6 @@ class How2comm(nn.Module):
         for b in range(B):
             N = record_len[b]
             t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
-            print("t_matrix.shape=", t_matrix.shape)
 
 
         if short_his and long_his:

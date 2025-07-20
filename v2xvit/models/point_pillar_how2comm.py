@@ -120,6 +120,11 @@ class PointPillarHow2comm(nn.Module):
             # n, 4 -> n, c encoding voxel feature using point-pillar method
             batch_dict = self.pillar_vfe(batch_dict)
             # n, c -> N, C, H, W
+            vox_bev = batch_dict['vox_bev']
+            print("vox_bev.shape=", vox_bev.shape)
+            # 下采样
+            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
+            his_vox.append(vox_bev)
             batch_dict = self.scatter(batch_dict)
             batch_dict = self.backbone(batch_dict)
             # N, C, H', W'
@@ -144,11 +149,7 @@ class PointPillarHow2comm(nn.Module):
             # feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
 
-            vox_bev = batch_dict['vox_bev']
-            print("vox_bev.shape=", vox_bev.shape)
-            # 下采样
-            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
-            his_vox.append(vox_bev)
+
 
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
