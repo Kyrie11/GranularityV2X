@@ -190,17 +190,15 @@ class PillarVFE(nn.Module):
         # scatter = CustomPointScatter(grid_size=(self.nx, self.ny, self.nz), C_bev=C)
         # vox_bev = scatter(features, coords)
         # batch_dict['vox_bev'] = vox_bev
-
-
-
-
+        voxel_count = features.shape[1]
+        mask = self.get_paddings_indicator(voxel_num_points, voxel_count, axis=0)
+        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
         features *= mask
         for pfn in self.pfn_layers:
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
 
-        voxel_count = features.shape[1]
         #点数(num of points)
         num_points_norm = voxel_num_points.view(-1, 1).float() / voxel_count
         #为了安全的除法， 防止体素中点数为0
@@ -208,8 +206,7 @@ class PillarVFE(nn.Module):
         #提取x,y,z,intensity
         points_xyz = voxel_features[:, :, :3]
         points_intensity = voxel_features[:, :, 3:4]
-        mask = self.get_paddings_indicator(voxel_num_points, voxel_count, axis=0)
-        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
+
         #平均激光雷达强度
         sum_intensity = (points_intensity * mask).sum(dim=1)
         mean_intensity = sum_intensity / safe_voxel_num_points
