@@ -47,6 +47,8 @@ class ContrastiveSparsityLoss(nn.Module):
         total_loss = []
 
         batch_size = len(sparse_g1)
+        print("batch_size=", batch_size)
+        print("len=", len(decision_mask_list))
         for b in range(batch_size):
             decision_mask = decision_mask_list[b]
             batch_sparse_g1 = sparse_g1[b]
