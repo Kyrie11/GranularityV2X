@@ -404,9 +404,8 @@ class AdvancedCommunication(nn.Module):
 
             net_utilities = utility_profiles - alphas * costs
             max_net_utility, best_granularity_idx = torch.max(net_utilities, dim=1) #两个shape都是[N-1,H,W]
-
             decision_map = best_granularity_idx + 1
-            print("decision_map.shape=", decision_map.shape)
+            # print("decision_map.shape=", decision_map.shape)
             decision_map[max_net_utility < self.thre] = 0 #[0:不通信，1:g1, 2:g2, 3:g3] [N-1,H,W]
             decision_mask_list.append(decision_map)
             # decision_map[max_net_utility < self.thre] = 0
