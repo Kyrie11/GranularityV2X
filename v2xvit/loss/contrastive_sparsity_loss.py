@@ -6,21 +6,16 @@ class GranularityEncoder(nn.Module):
     def __init__(self, in_channels, out_channels=128):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, out_channels, kernel_size=1, bias=False),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1)),  # 全局平均池化，得到 [B, D, 1, 1]
-            nn.Flatten()  # 展平为 [B, D]
+            nn.ReLU(inplace=True)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
 
 class ContrastiveSparsityLoss(nn.Module):
-    def __init__(self, c_g1, c_g2, c_g3, feature_dim=128, temperature=0.1):
+    def __init__(self, c_g1, c_g2, c_g3, feature_dim=128, temperature=0.1, k=4096, m=0.999):
         '''
         :param c_g1:
         :param c_g2:
@@ -30,14 +25,47 @@ class ContrastiveSparsityLoss(nn.Module):
         '''
         super().__init__()
 
-        self.g1_encoder = GranularityEncoder(c_g1, feature_dim)
-        self.g2_encoder = GranularityEncoder(c_g2, feature_dim)
-        self.g3_encoder = GranularityEncoder(c_g3, feature_dim)
-
-        self.encoder = [self.g1_encoder, self.g2_encoder, self.g3_encoder]
-
         self.temperature = temperature
+        self.k = k
+        self.m = m
+
+        self.encoders = nn.ModuleList([GranularityEncoder(c_g1, feature_dim), GranularityEncoder(c_g2, feature_dim), GranularityEncoder(c_g3, feature_dim)])
+
+        #创建负样本队列
+        for gran_type in ['g1', 'g2', 'g3']:
+            self.register_buffer(f"{gran_type}_queue", torch.randn(feature_dim, k))
+            # 归一化队列
+            queue = getattr(self, f"{gran_type}_queue")
+            setattr(self, f"{gran_type}_queue", nn.functional.normalize(queue, dim=0))
+            # 注册队列指针
+            self.register_buffer(f"{gran_type}_queue_ptr", torch.zeros(1, dtype=torch.long))
+
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
+
+    @torch.no_grad()
+    def _momentum_update_key_encoders(self):
+        """动量更新key_encoders的权重"""
+        for q_encoder, k_encoder in zip(self.query_encoders, self.key_encoders):
+            for param_q, param_k in zip(q_encoder.parameters(), k_encoder.parameters()):
+                param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys, granularity_name):
+        """
+        将当前批次的keys入队，并将最旧的keys出队。
+        Args:
+            keys (Tensor): 当前批次的keys, shape [N, D]
+        """
+        batch_size = keys.shape[0]
+        queue = getattr(self, f"{granularity_name}_queue")
+        ptr = int(getattr(self, f"{granularity_name}_queue_ptr"))
+
+        # 队列已满，替换旧的keys
+        assert self.K % batch_size == 0
+        queue[:, ptr:ptr + batch_size] = keys.T
+        ptr = (ptr + batch_size) % self.K  # 移动指针
+
+        getattr(self, f"{granularity_name}_queue_ptr")[0] = ptr
 
     def forward(self, sparse_data, dense_data, decision_mask_list):
         sparse_g1, sparse_g2, sparse_g3 = sparse_data
@@ -59,80 +87,72 @@ class ContrastiveSparsityLoss(nn.Module):
             batch_dense_g1 = dense_g1[b]
             batch_dense_g2 = dense_g2[b]
             batch_dense_g3 = dense_g3[b]
-            # batch_dense_data = [batch_dense_g1, batch_dense_g2, batch_dense_g3]
+            batch_dense_data = [batch_dense_g1, batch_dense_g2, batch_dense_g3]
 
             cav_num = batch_sparse_g1.shape[0]
             if cav_num <= 1:
                 continue
 
             with torch.no_grad():
-                dense_g1_keys = self.g1_encoder(batch_dense_g1)
-                dense_g2_keys = self.g2_encoder(batch_dense_g2)
-                dense_g3_keys = self.g3_encoder(batch_dense_g3)
+                dense_g1_keys = self.encoders[0](batch_dense_g1)
+                dense_g1_keys = F.normalize(dense_g1_keys, dim=1) #[N*H*W, D]
+                dense_g1_keys.permute(0, 2, 3, 1).reshape(-1, dense_g1_keys.shape[1])
+
+                dense_g2_keys = self.encoders[1](batch_dense_g2)
+                dense_g2_keys = F.normalize(dense_g2_keys, dim=1)  # [N*H*W, D]
+                dense_g2_keys.permute(0, 2, 3, 1).reshape(-1, dense_g2_keys.shape[1])
+
+                dense_g3_keys = self.encoders[0](batch_dense_g3)
+                dense_g3_keys = F.normalize(dense_g3_keys, dim=1)  # [N*H*W, D]
+                dense_g3_keys.permute(0, 2, 3, 1).reshape(-1, dense_g3_keys.shape[1])
                 all_dense_keys = [dense_g1_keys, dense_g2_keys, dense_g3_keys]
-            for i in range(1,  cav_num):
-                unique_mask = decision_mask[i-1,:,:]
-                unique_mask_cpu = unique_mask.cpu()
-                print("decision_mask:", unique_mask.shape)
-                for row in unique_mask_cpu:
-                    for decision_val in row:
-                        if decision_val == 0:
-                            continue
-                        granularity_idx = decision_val - 1
-                        encoder = self.encoder[granularity_idx]
-                        anchor_sparse_data = batch_sparse_data[granularity_idx][i:i+1]
-                        q = encoder(anchor_sparse_data)
 
-                        # Positive Key: 编码第i个CAV的对应稠密数据
-                        k_pos = all_dense_keys[granularity_idx][i:i+1]
+            negative_pool = torch.cat(all_dense_keys, dim=0)
 
-                        #构建负样本集
-                        # a) 跨智能体负样本 (Inter-Agent Negatives)
-                        # 对于当前粒度，其他所有CAV的稠密数据都是负样本
-                        neg_keys_list = []
-                        agent_indices = list(range(cav_num))
-                        agent_indices.pop(i)
-                        inter_agent_neg = all_dense_keys[granularity_idx][agent_indices]
-                        neg_keys_list.append(inter_agent_neg)
-                        # b) 跨粒度负样本 (Inter-Granularity Negatives)
-                        # 对于当前CAV，其他所有粒度的稠密数据都是负样本
-                        for other_gran_idx in range(3):
-                            if other_gran_idx == granularity_idx:
-                                continue
-                            inter_agent_neg = all_dense_keys[other_gran_idx][i:i+1]
-                            neg_keys_list.append(inter_agent_neg)
+            for gran_idx in range(1,4):
+                mask = (decision_mask == gran_idx)
+                if not mask.any():
+                    continue
 
-                        if not neg_keys_list:
-                            continue
+                agent_indices, y_indices, x_indices = torch.where(mask)
 
-                        # ------ 计算InfoNCE损失 ------
-                        k_neg = torch.cat(neg_keys_list, dim=0) #[N,D]
-                        # L2-normalize all vectors
-                        q = F.normalize(q, dim=1)
-                        k_pos = F.normalize(k_pos, dim=1)
-                        k_neg = F.normalize(k_neg, dim=1)
+                num_anchors = agent_indices.shape[0]
+                if num_anchors == 0:
+                    continue
 
-                        # 计算正样本相似度
-                        l_pos = torch.einsum('bd,bd->b', q, k_pos)  # Shape: [1]
-                        # 计算负样本相似度
-                        l_neg = torch.einsum('bd,nd->bn', q, k_neg)  # Shape: [1, N_neg]
-                        # 拼接成logits
-                        logits = torch.cat([l_pos.unsqueeze(1), l_neg], dim=1)  # Shape: [1, 1 + N_neg]
-                        # 应用温度系数
-                        logits /= self.temperature
+                sparse_data =  batch_sparse_data[gran_idx-1]
+                q_map_encoded = self.encoders[gran_idx-1](sparse_data)
+                q_map_encoded = F.normalize(q_map_encoded, dim=1)
 
-                        # 标签永远是第0个（正样本）
-                        # 我们只有一个查询，所以batch_size是1
-                        labels = torch.zeros(1, dtype=torch.long, device=q.device)
+                queries = q_map_encoded[agent_indices+1:,:,y_indices,x_indices] #考虑到从ego-agent后开始索引
+                dense_map = batch_dense_data[gran_idx-1]
 
-                        loss = self.criterion(logits, labels)
-                        total_loss.append(loss)
-            if not total_loss:
-                return torch.tensor(0.0, device=device)
+                with torch.no_grad():
+                    k_pos_map_encoded = self.encoders[gran_idx-1](dense_map)
+                    k_pos_map_encoded = F.normalize(k_pos_map_encoded, dim=1)
 
-            final_loss = torch.mean(torch.stack(total_loss))
+                    # 提取采样点对应的positive key向量
+                    positive_keys = k_pos_map_encoded[agent_indices+1,:,y_indices,x_indices]
 
-            return final_loss
+                # 正样本相似度
+                l_pos = torch.einsum('ad,ad->a', queries, positive_keys).unsqueeze(-1)  # [num_anchors, 1]
+                # 负样本相似度 (所有锚点共享同一个巨大的负样本池)
+                l_neg = torch.einsum('ad,nd->an', queries, negative_pool)  # [num_anchors, Total_Points]
+                # 拼接 logits
+                logits = torch.cat([l_pos, l_neg], dim=1)  # [num_anchors, 1 + Total_Points]
+                logits /= self.temperature
+                # 标签永远是第0个 (正样本)
+                labels = torch.zeros(num_anchors, dtype=torch.long, device=logits.device)
+
+                loss = self.criterion(logits, labels)
+                total_loss.append(loss)
+
+        if not total_loss:
+            return torch.tensor(0.0, device=device)
+
+        final_loss = torch.mean(torch.stack(total_loss))
+
+        return final_loss
 
 
 
