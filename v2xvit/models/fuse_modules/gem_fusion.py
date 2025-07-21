@@ -177,7 +177,9 @@ class GIC(nn.Module):
         """
         # 用最粗糙的上下文初始化隐藏状态
         h1 = self.initial_proj(f_g1)
-
+        print("h1.shape=", h1.shape)
+        print("f_g2.shape=", f_g2.shape)
+        print("h_temporal_prior.shape=", h_temporal_prior.shape)
         # 级联步骤 1: 用 h1 和时序先验来指导 G2 特征的融合
         h2 = self.gic_update_2(h1, f_g2, h_temporal_prior)
 
