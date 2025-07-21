@@ -212,7 +212,7 @@ class GEM_Fusion(nn.Module):
         # --- 粒度交互级联阶段 (Granularity Interaction Cascade) ---
         self.gic = GIC(c_g1=c_g1, c_g2=c_g2, c_g3=c_g3, c_temporal=c_temporal, c_fusion=c_fusion)
 
-    def forward(self, agent_data: List[Dict[str, torch.Tensor]], h_temporal_prior) -> torch.Tensor:
+    def forward(self, g1_data, g2_data, g3_data, h_temporal_prior) -> torch.Tensor:
         """
         Args:
             agent_data (List[Dict[str, torch.Tensor]]): A list of dictionaries.
@@ -227,15 +227,20 @@ class GEM_Fusion(nn.Module):
         Returns:
             torch.Tensor: The final fused BEV feature map of shape [B, c_fusion, H, W].
         """
-        ego_data = agent_data[0]
-        cav_data_list = agent_data[1:]
+        ego_g1 = g1_data[0:1]
+        ego_g2 = g2_data[0:1]
+        ego_g3 = g3_data[0:1]
+
+        cav_g1 = g1_data[1:]
+        cav_g2 = g2_data[1:]
+        cav_g3 = g3_data[1:]
 
         #ASM Fusion for each Granularity
-        f_g1_fused = self.asm_g1(f_ego=ego_data['G1'], f_cavs=[cav['G1'] for cav in cav_data_list])
+        f_g1_fused = self.asm_g1(f_ego=ego_g1, f_cavs=cav_g1)
 
-        f_g2_fused = self.asm_g2(f_ego=ego_data['G2'], f_cavs=[cav['G2'] for cav in cav_data_list])
+        f_g2_fused = self.asm_g2(f_ego=ego_g2, f_cavs=cav_g2)
 
-        f_g3_fused = self.asm_g3(f_ego=ego_data['G3'], f_cavs=[cav['G3'] for cav in cav_data_list])
+        f_g3_fused = self.asm_g3(f_ego=ego_g3, f_cavs=cav_g3)
 
         final_bev_feature = self.gic(f_g1_fused, f_g2_fused, f_g3_fused, h_temporal_prior)
 
