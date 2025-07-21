@@ -27,7 +27,7 @@ class How2comm(nn.Module):
         self.async_flag = False
         self.discrete_ratio = args['voxel_size'][0]
         self.c_temporal = 128
-
+        self.c_fusion = 256
         #时延补偿模块
         self.mgdc_bev_compensator = ContextFusionMotionPredictor(args['mgdc_bev_args'])
         #时延补偿损失
@@ -88,7 +88,7 @@ class How2comm(nn.Module):
         g2_data: feature-level data
         g3_data: detection-level data
     '''
-    def forward(self, g1_data, g2_data, g3_data, record_len, pairwise_t_matrix, delay=0, short_his=None, long_his=None):
+    def forward(self, g1_data, g2_data, g3_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None):
         curr_g1_data = g1_data
         curr_g2_data = g2_data
         curr_g3_data = g3_data
@@ -202,5 +202,6 @@ class How2comm(nn.Module):
                 fused_feat_list.append(fused_feat)
                 self.hidden_state[b:b+1] = node_hidden_state
             fused_feat = torch.cat(fused_feat_list, dim=0)
+            fused_feat = backbone.resnet(fused_feat)
 
         return fused_feat, commu_volume, delay_loss, commu_loss
