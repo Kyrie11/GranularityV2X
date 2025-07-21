@@ -149,6 +149,7 @@ class ContrastiveSparsityLoss(nn.Module):
                 print("negative_pool.shape=", candidate_negs.shape)
                 print("queries.shape=",queries.shape)
                 l_neg_candidate = torch.einsum('ad,nd->an', queries, candidate_negs)  # [num_anchors, Total_Points]
+                print("l_neg_candidate.shape=", l_neg_candidate.shape)
                 hardest_negs_sim, _ = torch.topk(l_neg_candidate,64,dim=1)
                 # 拼接 logits
                 logits = torch.cat([l_pos, hardest_negs_sim], dim=1)  # [num_anchors, 1 + Total_Points]
