@@ -188,10 +188,9 @@ class How2comm(nn.Module):
             batch_node_g2 = self.regroup(g2_data, record_len)
             batch_node_g3 = self.regroup(g3_data, record_len)
 
-            total_agents = sum(record_len)
             #初始化一个全零的隐藏状态 (记忆)
             if self.hidden_state is None or self.hidden_state.shape[0] != B:
-                self.hidden_state = torch.zeros(total_agents, self.c_temporal, H, W, device=device)
+                self.hidden_state = torch.zeros(B, self.c_temporal, H, W, device=device)
 
             batch_node_hidden_state = self.regroup(self.hidden_state, record_len)
             for b in range(B):
