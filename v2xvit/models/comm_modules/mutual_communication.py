@@ -431,7 +431,8 @@ class AdvancedCommunication(nn.Module):
             sparse_g2_out.append(sparse_g2)
             sparse_g3_out.append(sparse_g3)
 
-            commu_volume = g1_decision_mask.sum() + g2_decision_mask.sum() + g3_decision_mask.sum()
+            commu_volume = torch.float32(g1_decision_mask.sum() + g2_decision_mask.sum() + g3_decision_mask.sum())
+
             total_commu_volume.append(commu_volume)
         sparse_data = [sparse_g1_out, sparse_g2_out, sparse_g3_out]
         dense_data = [g1_list, g2_list, g3_list]
