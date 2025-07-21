@@ -146,7 +146,8 @@ class ContrastiveSparsityLoss(nn.Module):
                 candidate_negs = negative_pool[perm[:1024]]
 
                 # 负样本相似度 (所有锚点共享同一个巨大的负样本池)
-                print("negative_pool.shape=", candidate_negs.shape)
+                print("negative_pool.shape=", negative_pool.shape)
+                print("candidate_negs.shape=", candidate_negs.shape)
                 print("queries.shape=",queries.shape)
                 l_neg_candidate = torch.einsum('ad,nd->an', queries, candidate_negs)  # [num_anchors, Total_Points]
                 print("l_neg_candidate.shape=", l_neg_candidate.shape)
