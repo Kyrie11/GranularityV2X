@@ -39,9 +39,9 @@ class How2comm(nn.Module):
         # 通信模块
         self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
 
-        self.gem_fusion = GEM_Fusion(c_g1=8, c_g2=64, c_g3=8, c_temporal=128, c_fusion=256)
+        self.gem_fusion = GEM_Fusion(c_g1=8, c_g2=64, c_g3=8, c_temporal=self.c_temporal, c_fusion=64)
 
-        self.main_temporal_gru = ConvGRUCell(input_dim=64, hidden_dim=128, kernel_size=3)
+        self.main_temporal_gru = ConvGRUCell(input_dim=64, hidden_dim=self.c_temporal, kernel_size=3)
 
         self.hidden_state = None
 
