@@ -96,15 +96,15 @@ class ContrastiveSparsityLoss(nn.Module):
             with torch.no_grad():
                 dense_g1_keys = self.encoders[0](batch_dense_g1)
                 dense_g1_keys = F.normalize(dense_g1_keys, dim=1) #[N*H*W, D]
-                dense_g1_keys.permute(0, 2, 3, 1).reshape(-1, dense_g1_keys.shape[1])
+                dense_g1_keys = dense_g1_keys.permute(0, 2, 3, 1).reshape(-1, dense_g1_keys.shape[1])
 
                 dense_g2_keys = self.encoders[1](batch_dense_g2)
                 dense_g2_keys = F.normalize(dense_g2_keys, dim=1)  # [N*H*W, D]
-                dense_g2_keys.permute(0, 2, 3, 1).reshape(-1, dense_g2_keys.shape[1])
+                dense_g2_keys = dense_g2_keys.permute(0, 2, 3, 1).reshape(-1, dense_g2_keys.shape[1])
 
                 dense_g3_keys = self.encoders[0](batch_dense_g3)
                 dense_g3_keys = F.normalize(dense_g3_keys, dim=1)  # [N*H*W, D]
-                dense_g3_keys.permute(0, 2, 3, 1).reshape(-1, dense_g3_keys.shape[1])
+                dense_g3_keys = dense_g3_keys.permute(0, 2, 3, 1).reshape(-1, dense_g3_keys.shape[1])
                 all_dense_keys = [dense_g1_keys, dense_g2_keys, dense_g3_keys]
 
             negative_pool = torch.cat(all_dense_keys, dim=0)
