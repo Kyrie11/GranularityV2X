@@ -111,9 +111,8 @@ class ASM_Gate(nn.Module):
         Returns:
             torch.Tensor: 该粒度下融合后的特征图。
         """
-        if not f_cavs:
+        if f_cavs.shape[0] <=0:
             return f_ego
-
         # Aggregate collaborator features
         with torch.no_grad():
             f_cavs_tensor = torch.stack(f_cavs, dim=0)
