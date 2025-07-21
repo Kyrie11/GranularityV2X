@@ -202,6 +202,5 @@ class How2comm(nn.Module):
                 fused_feat_list.append(fused_feat)
                 self.hidden_state[b:b+1] = node_hidden_state
             fused_feat = torch.cat(fused_feat_list, dim=0)
-            fused_feat = backbone.resnet(fused_feat)
 
         return fused_feat, commu_volume, delay_loss, commu_loss
