@@ -124,7 +124,7 @@ class ContrastiveSparsityLoss(nn.Module):
                 q_map_encoded = self.encoders[gran_idx-1](sparse_data)
                 q_map_encoded = F.normalize(q_map_encoded, dim=1)
 
-                queries = q_map_encoded[agent_indices+1:,:,y_indices,x_indices] #考虑到从ego-agent后开始索引
+                queries = q_map_encoded[agent_indices+1,:,y_indices,x_indices] #考虑到从ego-agent后开始索引
                 dense_map = batch_dense_data[gran_idx-1]
 
                 with torch.no_grad():
