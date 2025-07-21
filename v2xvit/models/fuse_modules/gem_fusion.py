@@ -84,13 +84,7 @@ class ASM_Gate(nn.Module):
 
         #生成调制门的网络(输入为上下文+特定协作者特征)
         gate_net_input_dim = c_context + c_in
-        # self.gate_net = nn.Sequential(
-        #     nn.Conv2d(gate_net_input_dim, c_in, kernel_size=3, padding=1, bias=False),
-        #     nn.BatchNorm2d(c_in),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(c_in, c_in, kernel_size=1),
-        #     nn.Sigmoid()  # Gate values should be in [0, 1]
-        # )
+
         self.gate_net = nn.Sequential(
             nn.Conv2d(gate_net_input_dim, c_in, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(c_in),
@@ -102,7 +96,7 @@ class ASM_Gate(nn.Module):
         self.common_gate_head = nn.Conv2d(c_in, c_in, kernel_size=1)
 
 
-    def forward(self, f_ego, f_cavs):
+    def forward(self, g_data):
         """
         Args:
             f_ego (torch.Tensor): Ego-Agent 的特征图。
@@ -111,36 +105,42 @@ class ASM_Gate(nn.Module):
         Returns:
             torch.Tensor: 该粒度下融合后的特征图。
         """
-        if f_cavs.shape[0] <=0:
-            return f_ego
-        # Aggregate collaborator features
+        agent_num = g_data.shape[0]
+        if agent_num <= 1:
+            return g_data
+
+        f_ego = g_data[0:1]
+        f_collab = g_data[1:]
         with torch.no_grad():
-            f_cavs_tensor = torch.stack(f_cavs, dim=0)
-            f_agg, _ = torch.max(f_cavs_tensor, dim=0)
+            f_agg, _ = torch.max(f_collab, dim=0, keepdim=True)
 
         # Generate modulation contexts
-        context_input = torch.cat([f_ego, f_agg], dim=1)
-        context_map = self.context_net(context_input)
+        context_input = torch.cat([f_ego, f_agg], dim=1)# Shape: [1, 2*C, H, W]
+        context_map = self.context_net(context_input)# Shape: [1, c_context, H, W]
 
         sum_of_exclusive_features = 0
         sum_of_common_features = 0
 
-        # Modulate and sum features from all collaboratorss
-        for f_cav in f_cavs:
-            gate_input = torch.cat([context_map, f_cav], dim=1)
-            gate_features = self.gate_net(gate_input)
+        context_map_expanded = context_map.expand(agent_num-1, -1, -1, -1)
 
-            #计算两种门并用Sigmoid激活
-            exclusive_gate = torch.sigmoid(self.exclusive_gate_head(gate_features))
-            common_gate = torch.sigmoid(self.common_gate_head(gate_features))
+        gate_input = torch.cat([context_map_expanded, f_collab], dim=1)
+        gate_features = self.gate_net(gate_input)
 
-            #分别对特征进行 调制并累加
-            sum_of_exclusive_features += exclusive_gate * f_cav
-            sum_of_common_features += common_gate * f_cav
+        exclusive_gate = torch.sigmoid(self.exclusive_gate_head(gate_features))
+        common_gate = torch.sigmoid(self.common_gate_head(gate_features))
 
+        exclusive_features = exclusive_gate * f_collab
+        common_features = common_gate * f_collab
+
+        # f. 对调制后的特征求和
+        #    keepdim=True 确保输出 shape 为 [1, C, H, W]
+        sum_of_exclusive_features = torch.sum(exclusive_features, dim=0, keepdim=True)
+        sum_of_common_features = torch.sum(common_features, dim=0, keepdim=True)
+        # 5. 最终融合: Ego特征 + 补盲特征 + 增强特征
         f_fused = f_ego + sum_of_exclusive_features + sum_of_common_features
 
         return f_fused
+
 
 class GIC(nn.Module):
     """
@@ -226,20 +226,13 @@ class GEM_Fusion(nn.Module):
         Returns:
             torch.Tensor: The final fused BEV feature map of shape [B, c_fusion, H, W].
         """
-        ego_g1 = g1_data[0:1]
-        ego_g2 = g2_data[0:1]
-        ego_g3 = g3_data[0:1]
-
-        cav_g1 = g1_data[1:]
-        cav_g2 = g2_data[1:]
-        cav_g3 = g3_data[1:]
 
         #ASM Fusion for each Granularity
-        f_g1_fused = self.asm_g1(f_ego=ego_g1, f_cavs=cav_g1)
+        f_g1_fused = self.asm_g1(g1_data)
 
-        f_g2_fused = self.asm_g2(f_ego=ego_g2, f_cavs=cav_g2)
+        f_g2_fused = self.asm_g2(g2_data)
 
-        f_g3_fused = self.asm_g3(f_ego=ego_g3, f_cavs=cav_g3)
+        f_g3_fused = self.asm_g3(g3_data)
 
         final_bev_feature = self.gic(f_g1_fused, f_g2_fused, f_g3_fused, h_temporal_prior)
 
