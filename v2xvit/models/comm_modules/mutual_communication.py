@@ -437,7 +437,10 @@ class AdvancedCommunication(nn.Module):
         sparse_data = [sparse_g1_out, sparse_g2_out, sparse_g3_out]
         dense_data = [g1_list, g2_list, g3_list]
         loss = self.contrastive_sparsity_loss(sparse_data, dense_data, decision_mask_list)
-        mean_communication_volume = torch.mean(torch.stack(total_commu_volume).float())
+        if len(total_commu_volume) < 1:
+            mean_communication_volume = 0
+        else:
+            mean_communication_volume = torch.mean(torch.stack(total_commu_volume).float())
         return (torch.cat(sparse_g1_out, dim=0),
                 torch.cat(sparse_g2_out, dim=0),
                 torch.cat(sparse_g3_out, dim=0),
