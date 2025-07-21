@@ -200,7 +200,7 @@ class How2comm(nn.Module):
                 fused_feat = self.gem_fusion(node_g1, node_g2, node_g3, node_hidden_state)
                 node_hidden_state = self.main_temporal_gru(fused_feat, node_hidden_state)
                 fused_feat_list.append(fused_feat)
-                self.hidden_state[b:b+1] = node_hidden_state
+                # self.hidden_state[b:b+1] = node_hidden_state
             fused_feat = torch.cat(fused_feat_list, dim=0)
 
         return fused_feat, commu_volume, delay_loss, commu_loss
