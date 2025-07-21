@@ -139,7 +139,7 @@ class ContrastiveSparsityLoss(nn.Module):
                 l_pos = torch.einsum('ad,ad->a', queries, positive_keys).unsqueeze(-1)  # [num_anchors, 1]
                 # 负样本相似度 (所有锚点共享同一个巨大的负样本池)
                 print("negative_pool.shape=", negative_pool.shape)
-                print("queries.shape=",queries,shape)
+                print("queries.shape=",queries.shape)
                 l_neg = torch.einsum('ad,nd->an', queries, negative_pool)  # [num_anchors, Total_Points]
                 # 拼接 logits
                 logits = torch.cat([l_pos, l_neg], dim=1)  # [num_anchors, 1 + Total_Points]
