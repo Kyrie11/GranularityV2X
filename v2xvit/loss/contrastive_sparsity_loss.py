@@ -70,8 +70,11 @@ class ContrastiveSparsityLoss(nn.Module):
     def forward(self, sparse_data, dense_data, decision_mask_list):
         sparse_g1, sparse_g2, sparse_g3 = sparse_data
         dense_g1, dense_g2, dense_g3 = dense_data
-
         device = sparse_g1[0].device
+
+        if len(decision_mask_list) <= 0:
+            return torch.tensor(0.0, device=device)
+
         total_loss = []
 
         batch_size = len(sparse_g1)
