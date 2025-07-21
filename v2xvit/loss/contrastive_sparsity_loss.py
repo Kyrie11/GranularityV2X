@@ -26,8 +26,8 @@ class ContrastiveSparsityLoss(nn.Module):
         super().__init__()
 
         self.temperature = temperature
-        self.k = k
-        self.m = m
+        self.num_neg_candidates = 2048
+        self.num_hard_negs = 64
 
         self.encoders = nn.ModuleList([GranularityEncoder(c_g1, feature_dim), GranularityEncoder(c_g2, feature_dim), GranularityEncoder(c_g3, feature_dim)])
 
@@ -42,12 +42,7 @@ class ContrastiveSparsityLoss(nn.Module):
 
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    @torch.no_grad()
-    def _momentum_update_key_encoders(self):
-        """动量更新key_encoders的权重"""
-        for q_encoder, k_encoder in zip(self.query_encoders, self.key_encoders):
-            for param_q, param_k in zip(q_encoder.parameters(), k_encoder.parameters()):
-                param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
+
 
     @torch.no_grad()
     def _dequeue_and_enqueue(self, keys, granularity_name):
@@ -68,8 +63,8 @@ class ContrastiveSparsityLoss(nn.Module):
         getattr(self, f"{granularity_name}_queue_ptr")[0] = ptr
 
     def forward(self, sparse_data, dense_data, decision_mask_list):
-        sparse_g1, sparse_g2, sparse_g3 = sparse_data
-        dense_g1, dense_g2, dense_g3 = dense_data
+        sparse_g1, sparse_g2, sparse_g3 = sparse_data #sparse_g1、sparse_g2、sparse_g3都是list，长度都是batch_size，里面的shape都是[N,C,H,W]，包括ego-agent
+        dense_g1, dense_g2, dense_g3 = dense_data #dense_data的组织方式和sparse_data同理
         device = sparse_g1[0].device
 
         if len(decision_mask_list) <= 0:
@@ -78,10 +73,9 @@ class ContrastiveSparsityLoss(nn.Module):
         total_loss = []
 
         batch_size = len(sparse_g1)
-        print("batch_size=", batch_size)
-        print("len=", len(decision_mask_list))
+
         for b in range(batch_size):
-            decision_mask = decision_mask_list[b]
+            decision_mask = decision_mask_list[b]#decision_mask_list的长度也是batch_size，里面每个decision_map的shape是[N-1,H,W]
             batch_sparse_g1 = sparse_g1[b]
             batch_sparse_g2 = sparse_g2[b]
             batch_sparse_g3 = sparse_g3[b]
@@ -93,7 +87,7 @@ class ContrastiveSparsityLoss(nn.Module):
             batch_dense_data = [batch_dense_g1, batch_dense_g2, batch_dense_g3]
 
             cav_num = batch_sparse_g1.shape[0]
-            if cav_num <= 1:
+            if cav_num <= 1: #如果场景中只有ego-agent
                 continue
 
             with torch.no_grad():
@@ -143,14 +137,12 @@ class ContrastiveSparsityLoss(nn.Module):
                 l_pos = torch.einsum('ad,ad->a', queries, positive_keys).unsqueeze(-1)  # [num_anchors, 1]
 
                 perm = torch.randperm(num_negatives, device=device)
+                candidate_negs = negative_pool
+
                 candidate_negs = negative_pool[perm[:1024]]
 
                 # 负样本相似度 (所有锚点共享同一个巨大的负样本池)
-                print("negative_pool.shape=", negative_pool.shape)
-                print("candidate_negs.shape=", candidate_negs.shape)
-                print("queries.shape=",queries.shape)
                 l_neg_candidate = torch.einsum('ad,nd->an', queries, candidate_negs)  # [num_anchors, Total_Points]
-                print("l_neg_candidate.shape=", l_neg_candidate.shape)
                 hardest_negs_sim, _ = torch.topk(l_neg_candidate,64,dim=1)
                 # 拼接 logits
                 logits = torch.cat([l_pos, hardest_negs_sim], dim=1)  # [num_anchors, 1 + Total_Points]

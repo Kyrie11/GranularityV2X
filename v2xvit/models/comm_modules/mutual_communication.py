@@ -407,6 +407,7 @@ class AdvancedCommunication(nn.Module):
             decision_map = best_granularity_idx + 1
             # print("decision_map.shape=", decision_map.shape)
             decision_map[max_net_utility < self.thre] = 0 #[0:不通信，1:g1, 2:g2, 3:g3] [N-1,H,W]
+            decision_map = decision_map.to(device)
             decision_mask_list.append(decision_map)
             # decision_map[max_net_utility < self.thre] = 0
 
