@@ -26,8 +26,7 @@ class How2comm(nn.Module):
         self.downsample_rate = args['downsample_rate']
         self.async_flag = False
         self.discrete_ratio = args['voxel_size'][0]
-        self.c_temporal = 128
-        self.c_fusion = 256
+
         #时延补偿模块
         self.mgdc_bev_compensator = ContextFusionMotionPredictor(args['mgdc_bev_args'])
         #时延补偿损失
@@ -39,9 +38,10 @@ class How2comm(nn.Module):
         # 通信模块
         self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
 
-        self.gem_fusion = GEM_Fusion(c_g1=8, c_g2=64, c_g3=8, c_temporal=self.c_temporal, c_fusion=64)
+        self.c_temporal = 128
+        self.gem_fusion = GEM_Fusion(c_g1=8, c_g2=64, c_g3=8, c_temporal=self.c_temporal, c_fusion=256)
 
-        self.main_temporal_gru = ConvGRUCell(input_dim=64, hidden_dim=self.c_temporal, kernel_size=3)
+        self.main_temporal_gru = ConvGRUCell(input_dim=256, hidden_dim=self.c_temporal, kernel_size=3)
 
         self.hidden_state = None
 
