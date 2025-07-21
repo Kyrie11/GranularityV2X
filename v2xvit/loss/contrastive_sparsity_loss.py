@@ -109,6 +109,7 @@ class ContrastiveSparsityLoss(nn.Module):
 
             negative_pool = torch.cat(all_dense_keys, dim=0)
 
+
             for gran_idx in range(1,4):
                 mask = (decision_mask == gran_idx)
                 if not mask.any():
@@ -137,6 +138,8 @@ class ContrastiveSparsityLoss(nn.Module):
                 # 正样本相似度
                 l_pos = torch.einsum('ad,ad->a', queries, positive_keys).unsqueeze(-1)  # [num_anchors, 1]
                 # 负样本相似度 (所有锚点共享同一个巨大的负样本池)
+                print("negative_pool.shape=", negative_pool.shape)
+                print("queries.shape=",queries,shape)
                 l_neg = torch.einsum('ad,nd->an', queries, negative_pool)  # [num_anchors, Total_Points]
                 # 拼接 logits
                 logits = torch.cat([l_pos, l_neg], dim=1)  # [num_anchors, 1 + Total_Points]
