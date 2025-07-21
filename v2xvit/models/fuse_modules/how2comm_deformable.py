@@ -192,16 +192,15 @@ class How2comm(nn.Module):
             if self.hidden_state is None or self.hidden_state.shape[0] != B:
                 self.hidden_state = torch.zeros(B, self.c_temporal, H, W, device=device)
 
-            batch_node_hidden_state = self.regroup(self.hidden_state, record_len)
             for b in range(B):
                 node_g1 = batch_node_g1[b]
                 node_g2 = batch_node_g2[b]
                 node_g3 = batch_node_g3[b]
-                node_hidden_state = batch_node_hidden_state[b]
+                node_hidden_state = self.hidden_state[b:b+1]
                 fused_feat = self.gem_fusion(node_g1, node_g2, node_g3, node_hidden_state)
                 node_hidden_state = self.main_temporal_gru(fused_feat, node_hidden_state)
                 fused_feat_list.append(fused_feat)
-                batch_node_hidden_state[b] = node_hidden_state
+                self.hidden_state[b:b+1] = node_hidden_state
             fused_feat = torch.cat(fused_feat_list, dim=0)
             self.hidden_state = torch.cat(batch_node_hidden_state, dim=0)
 
