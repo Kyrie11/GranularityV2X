@@ -346,7 +346,6 @@ class BaseDataset(Dataset):
                 break
 
         scenario_start_idx = 0 if scenario_index == 0 else self.len_record[scenario_index - 1]
-        timestamp_index = idx - scenario_start_idx
 
         # 2. Generate the desired indices for short and long-term history
         short_term_target_indices = []
