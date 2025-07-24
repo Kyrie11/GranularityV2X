@@ -365,7 +365,7 @@ class BaseDataset(Dataset):
         all_target_indices = set(short_term_target_indices) | set(long_term_target_indices)
 
         # 4. Filter ALL index lists to ensure they are within the current scenario's bounds
-        valid_unique_indices = sorted([i for i in all_target_indices if i >= scenario_start_index], reverse=True)
+        valid_unique_indices = sorted([i for i in all_target_indices if i >= scenario_start_idx], reverse=True)
 
         valid_short_indices = [i for i in short_term_target_indices if i in valid_unique_indices]
         valid_long_indices = [i for i in long_term_target_indices if i in valid_unique_indices]
