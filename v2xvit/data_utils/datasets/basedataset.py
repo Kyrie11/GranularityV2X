@@ -353,14 +353,12 @@ class BaseDataset(Dataset):
         if p>0:
             for i in range(p):
                 short_term_target_indices.append(idx - i)
-        print("short_term:", short_term_target_indices)
 
         # Long-term history: m frames with interval n, starting from idx
         long_term_target_indices = []
         if m>0 and n>0:
             for i in range(m):
                 long_term_target_indices.append(idx - (i*n))
-        print("long_term:", long_term_target_indices)
         # 3. Get the combined set of unique indices needed for data fetching
         all_target_indices = set(short_term_target_indices) | set(long_term_target_indices)
 
@@ -369,7 +367,6 @@ class BaseDataset(Dataset):
 
         valid_short_indices = [i for i in short_term_target_indices if i in valid_unique_indices]
         valid_long_indices = [i for i in long_term_target_indices if i in valid_unique_indices]
-        print("valid_indices:", valid_unique_indices)
         if not valid_unique_indices:
             return OrderedDict(), [], [], []
 

@@ -150,6 +150,8 @@ def main():
             # 1. Create a mapping from an index to its corresponding data
             # This is the crucial step to link indices back to their data
             data_map = {index: data for index, data in zip(unique_indices, collated_data_list)}
+            print("short_indices:", short_indices)
+            print("long_indices:", long_indices)
             print("unique_indices outside:", unique_indices)
             # 2. Reconstruct the final history lists using the correct indices
             short_term_history_data = [data_map[idx] for idx in short_indices]
