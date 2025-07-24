@@ -55,6 +55,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                                                       p=p,
                                                       cur_ego_pose_flag=self.cur_ego_pose_flag)
 
+        index,_ = select_dict.items()
+        print("select_dict的index：",index)
+
         if not select_dict:
             return None
 
