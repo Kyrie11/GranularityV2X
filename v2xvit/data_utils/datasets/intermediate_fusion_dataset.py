@@ -205,6 +205,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             assert len(set(ego_id_list)) == 1, "The ego id must be same"
         except AssertionError as aeeor:
             print("assert error ego id", ego_id_list)
+        print("unique_indices in getitem:",unique_indices)
         return processed_data_list, unique_indices, short_indices, long_indices
 
     @staticmethod
