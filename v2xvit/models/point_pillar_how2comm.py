@@ -98,7 +98,7 @@ class PointPillarHow2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, data_dict_list):
+    def forward(self, short_term, long_term):
         delay = 0
         batch_dict_list = []
         feature_2d_list = []
@@ -106,7 +106,7 @@ class PointPillarHow2comm(nn.Module):
         his_vox = []
         his_feat = []
         his_det = []
-        for origin_data in data_dict_list:
+        for origin_data in short_term:
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']

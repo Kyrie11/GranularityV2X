@@ -42,6 +42,12 @@ def main():
     opencood_validate_dataset = build_dataset(hypes,
                                               visualize=False,
                                               train=False)
+
+    temporal_config = hypes['train_params']['temporal_config']
+    n = temporal_config['long_term_stride']  # 长期历史帧间隔
+    m = temporal_config['long_term_memory']  # 长期历史帧数
+    p = temporal_config['short_term_memory']  # 短期历史帧数
+
     if opt.distributed:
         sampler_train = DistributedSampler(opencood_train_dataset)
         sampler_val = DistributedSampler(opencood_validate_dataset,
@@ -138,21 +144,32 @@ def main():
         pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
         record_len_list = []
         for i, batch_data_list in enumerate(train_loader):
-            for v in batch_data_list:
-                record_len_list.append(v['ego']['record_len'][0].item())
-            if len(set(record_len_list)) != 1:
-                record_len_list = []
+            if batch_data_list is None:
                 continue
-            record_len_list = []
+            collated_data_list, unique_indices, short_indices, long_indices = batch_data_list
+            # 1. Create a mapping from an index to its corresponding data
+            # This is the crucial step to link indices back to their data
+            data_map = {index: data for index, data in zip(unique_indices, collated_data_list)}
+            # 2. Reconstruct the final history lists using the correct indices
+            short_term_history_data = [data_map[idx] for idx in short_indices]
+            long_term_history_data = [data_map[idx] for idx in long_indices]
+
+            batch_data = short_term_history_data[0]
+            batch_data = train_utils.to_device(batch_data, device)
+            short_term_history_data = train_utils.to_device(short_term_history_data, device)
+            long_term_history_data = train_utils.to_device(long_term_history_data, device)
+            # 3. VERIFY THE LOGIC
+            if i < 2:  # Check the first couple of iterations
+                print(f"--- Iteration {i} ---")
+                print(f"Short-term indices required: {short_indices}")
+                print(f"Long-term indices required:  {long_indices}")
+                print(f" short-term history length: {len(short_term_history_data)}")
+                print(f" long-term history length:  {len(long_term_history_data)}")
+                print("-" * 20)
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()
             optimizer.zero_grad()
-
-            batch_data = batch_data_list[0]
-
-            batch_data_list = train_utils.to_device(batch_data_list, device)
-            batch_data = train_utils.to_device(batch_data, device)
 
             # case1 : late fusion train --> only ego needed
             # case2 : early fusion train --> all data projected to ego
@@ -160,13 +177,13 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                ouput_dict = model(batch_data_list)
+                ouput_dict = model(short_term_history_data, long_term_history_data)
                 final_loss = criterion(ouput_dict,
                                        batch_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
-                    ouput_dict = model(batch_data_list)
+                    ouput_dict = model(short_term_history_data, long_term_history_data)
                     # first argument is always your output dictionary,
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,

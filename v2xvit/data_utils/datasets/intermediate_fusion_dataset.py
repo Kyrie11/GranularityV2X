@@ -29,30 +29,50 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             params['postprocess'],
             train)  # 3D Anchor Generator for Voxel
 
+        if 'temporal_config' in params['train_params']:
+            self.temporal_config = params['train_params']['temporal_config']
+        else:
+            #如果没有配置，则默认为只加载当前帧
+            self.temporal_config = {'long_term_stride': 1, 'long_term_memory': 1, 'short_term_memory': 1}
+
+    '''
+        把原来的顺序取多帧改为取长短期历史帧
+    '''
     def __getitem__(self, idx): 
         # when the cur_ego_pose_flag is set to True, there is no time gap
         # between  the time when the LiDAR data is captured by connected
         # agents and when the extracted features are received by
         # the ego vehicle. This is equal to implement STCM.
-        select_num = self.frame
-        select_dict,scenario_index,index_list,timestamp_index = self.retrieve_multi_data(idx,select_num,cur_ego_pose_flag=self.cur_ego_pose_flag)
-        if timestamp_index < select_num:
-            idx += select_num 
+        n = self.temporal_config['long_term_stride'] #长期历史帧间隔
+        m = self.temporal_config['long_term_memory'] #长期历史帧数
+        p = self.temporal_config['short_term_memory'] #短期历史帧数
+
+        #调用加载长短期历史的函数
+        select_dict, unique_indices, short_indices, long_indices = self.retrieve_long_short_his(
+                                                      idx,
+                                                      n=n,
+                                                      m=m,
+                                                      p=p,
+                                                      cur_ego_pose_flag=self.cur_ego_pose_flag)
+
+        if not select_dict:
+            return None
+
         try:
             assert idx == list(select_dict.keys())[
                 0], "The first element in the multi frame must be current index"
-        except AssertionError as aeor:
-            print("assert error dataset",list(select_dict.keys()),idx,timestamp_index)
-        processed_data_list = []  
+        except AssertionError as aeeor:
+            print("assert error dataset", list(select_dict.keys()), idx)
+        processed_data_list = []
         ego_id = -1
         ego_lidar_pose = []
-        ego_id_list = []  
-        cav_id_list = []  
-        for index,base_data_dict in select_dict.items():
-            processed_data_dict = OrderedDict()  
+        ego_id_list = []
+        cav_id_list = []
+        for index, base_data_dict in select_dict.items():
+            processed_data_dict = OrderedDict()
             processed_data_dict['ego'] = {}
 
-            if index == idx:  
+            if index == idx:
                 # first find the ego vehicle's lidar pose
                 for cav_id, cav_content in base_data_dict.items():
                     if cav_content['ego']:
@@ -64,11 +84,11 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             assert ego_id != -1
             assert len(ego_lidar_pose) > 0
             ego_id_list.append(ego_id)
-            # this is used for v2vnet and disconet 
+            # this is used for v2vnet and disconet
             pairwise_t_matrix = \
                 self.get_pairwise_transformation(base_data_dict,
-                                                self.params['train_params'][
-                                                    'max_cav'])
+                                                 self.params['train_params'][
+                                                     'max_cav'])
 
             processed_features = []
             object_stack = []
@@ -89,14 +109,14 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 # check if the cav is within the communication range with ego
                 distance = \
                     math.sqrt((selected_cav_base['params']['lidar_pose'][0] -
-                            ego_lidar_pose[0]) ** 2 + (
-                                    selected_cav_base['params'][
-                                        'lidar_pose'][1] - ego_lidar_pose[
-                                        1]) ** 2)
+                               ego_lidar_pose[0]) ** 2 + (
+                                      selected_cav_base['params'][
+                                          'lidar_pose'][1] - ego_lidar_pose[
+                                          1]) ** 2)
                 # if distance > v2xvit.data_utils.datasets.COM_RANGE and index == idx:
                 # if distance > v2xvit.data_utils.datasets.COM_RANGE:
                 #     continue
-                if index == idx:  
+                if index == idx:
                     if distance > v2xvit.data_utils.datasets.COM_RANGE:
                         continue
                     cav_id_list.append(cav_id)
@@ -158,23 +178,23 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             time_delay = time_delay + (self.max_cav - len(time_delay)) * [0.]
             infra = infra + (self.max_cav - len(infra)) * [0.]
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
-            padding_eye = np.tile(np.eye(4)[None],(self.max_cav - len(
-                                                spatial_correction_matrix),1,1))
+            padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(
+                spatial_correction_matrix), 1, 1))
             spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
 
             processed_data_dict['ego'].update(
                 {'object_bbx_center': object_bbx_center,
-                'object_bbx_mask': mask,
-                'object_ids': [object_id_stack[i] for i in unique_indices],
-                'anchor_box': anchor_box,
-                'processed_lidar': merged_feature_dict,
-                'label_dict': label_dict,
-                'cav_num': cav_num,
-                'velocity': velocity,
-                'time_delay': time_delay,
-                'infra': infra,
-                'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix})
+                 'object_bbx_mask': mask,
+                 'object_ids': [object_id_stack[i] for i in unique_indices],
+                 'anchor_box': anchor_box,
+                 'processed_lidar': merged_feature_dict,
+                 'label_dict': label_dict,
+                 'cav_num': cav_num,
+                 'velocity': velocity,
+                 'time_delay': time_delay,
+                 'infra': infra,
+                 'spatial_correction_matrix': spatial_correction_matrix,
+                 'pairwise_t_matrix': pairwise_t_matrix})
 
             if self.visualize:
                 processed_data_dict['ego'].update({'origin_lidar':
@@ -184,8 +204,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         try:
             assert len(set(ego_id_list)) == 1, "The ego id must be same"
         except AssertionError as aeeor:
-            print("assert error ego id",ego_id_list)
-        return processed_data_list
+            print("assert error ego id", ego_id_list)
+        return processed_data_list, unique_indices, short_indices, long_indices
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):
@@ -303,8 +323,23 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     merged_feature_dict[feature_name].append(feature)
 
         return merged_feature_dict
-    
-    def collate_batch_train(self, batch):  
+
+    def collate_batch_train(self, batch):
+        batch = [item for item in batch if item is not None]
+        if not batch: return None
+        assert len(batch) == 1, "Batch size must be 1 for history mode."
+
+        processed_data_list, unique_indices, short_indices, long_indices = batch[0]
+        output_dict_list = self.collate_single_item_history([processed_data_list])
+
+        return output_dict_list, unique_indices, short_indices, long_indices
+
+    def collate_single_item_history(self, batch):
+        #过滤掉getitem返回的None值
+        batch = [item for item in batch if item is not None]
+        #如果整个batch都被过滤掉了， 返回一个空列表或其他标记
+        if not batch:
+            return None
         # Intermediate fusion is different the other two
         output_dict_list = []
         for j in range(len(batch[0])):  

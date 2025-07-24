@@ -188,6 +188,33 @@ class GIC(nn.Module):
 
         return h3
 
+class ConvGRUCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias=True):
+        super(ConvGRUCell, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.kernel_size = kernel_size
+        self.padding = kernel_size//2
+
+        self.conv = nn.Conv2d(self.input_dim + self.hidden_dim, 2 * self.hidden_dim, self.kernel_size, padding=self.padding, bias=bias)
+        self.conv_candidate = nn.Conv2d(self.input_dim+ + self.hidden_dim, self.hidden_dim, self.kernel_size, padding=self.padding, bias=bias)
+
+    def forward(self, input_tensor,cur_state):
+        h_cur = cur_state
+        combined = torch.cat([input_tensor, h_cur], dim=1)
+
+        combined_conv = self.conv(combined)
+        gamma, beta = torch.split(combined_conv, self.hidden_dim, dim=1)
+        reset_gate = torch.sigmoid(gamma)
+        update_gate = torch.sigmoid(beta)
+
+        combined_candidate = torch.cat([input_tensor, reset_gate*h_cur], dim=1)
+        cc_cnm = self.conv_candidate(combined_candidate)
+        h_next = torch.tanh(cc_cnm)
+
+        h_new = (1-update_gate) * h_cur + update_gate * h_next
+        return h_new
+
 class GEM_Fusion(nn.Module):
     """
     完整的 GEM-Fusion
@@ -239,31 +266,3 @@ class GEM_Fusion(nn.Module):
         final_bev_feature = self.gic(f_g1_fused, f_g2_fused, f_g3_fused, h_temporal_prior)
 
         return final_bev_feature
-
-class ConvGRUCell(nn.Module):
-    def __init__(self, input_dim, hidden_dim, kernel_size, bias=True):
-        super(ConvGRUCell, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.kernel_size = kernel_size
-        self.padding = kernel_size//2
-
-        self.conv = nn.Conv2d(self.input_dim + self.hidden_dim, 2 * self.hidden_dim, self.kernel_size, padding=self.padding, bias=bias)
-        self.conv_candidate = nn.Conv2d(self.input_dim+ + self.hidden_dim, self.hidden_dim, self.kernel_size, padding=self.padding, bias=bias)
-
-    def forward(self, input_tensor,cur_state):
-        h_cur = cur_state
-        combined = torch.cat([input_tensor, h_cur], dim=1)
-
-        combined_conv = self.conv(combined)
-        gamma, beta = torch.split(combined_conv, self.hidden_dim, dim=1)
-        reset_gate = torch.sigmoid(gamma)
-        update_gate = torch.sigmoid(beta)
-
-        combined_candidate = torch.cat([input_tensor, reset_gate*h_cur], dim=1)
-        cc_cnm = self.conv_candidate(combined_candidate)
-        h_next = torch.tanh(cc_cnm)
-
-        h_new = (1-update_gate) * h_cur + update_gate * h_next
-        return h_new
-

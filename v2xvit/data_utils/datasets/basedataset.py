@@ -172,7 +172,7 @@ class BaseDataset(Dataset):
 
     def __getitem__(self, idx):
         """
-        Abstract method, needs to be define by the children class.
+        Abstract method, needs to be definecollate_batch_train by the children class.
         """
         pass
     
@@ -313,6 +313,83 @@ class BaseDataset(Dataset):
                 data[cav_id]['lidar_np'] = \
                     pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
         return data
+
+    """
+    获取长短期历史帧
+    Parameters
+        ----------
+    idx: int
+            the current index given by the dataloader
+    m : int
+            The number of long-term history frames (m). 
+    n : int
+            The stride for sampling long-term history frames (n). E.g., n=3 means every 3rd frame.
+    p : int
+            The number of recent frames for short-term history (p).
+    cur_ego_pose_flag : bool
+            Passed to the underlying data retrieval functions.
+            
+    Returns
+        -------
+        select_dict : OrderedDict
+            A dictionary where keys are the frame indices and values are the loaded data dictionaries.
+        
+        final_indices : list
+            A sorted list of unique global indices that were loaded.
+    """
+    def retrieve_long_short_his(self, idx, p, m, n, cur_ego_pose_flag=True):
+        # 1. Find the scenario and timestamp index for the current frame `idx`
+        scenario_index = 0
+        for i, ele in enumerate(self.len_record):
+            if idx < ele:
+                scenario_index = i
+                break
+
+        scenario_start_idx = 0 if scenario_index == 0 else self.len_record[scenario_index - 1]
+        timestamp_index = idx - scenario_start_idx
+
+        # 2. Generate the desired indices for short and long-term history
+        short_term_target_indices = []
+        # Short-term history: p consecutive frames ending at idx
+        if p>0:
+            for i in range(p):
+                short_term_target_indices.append(idx - i)
+
+        # Long-term history: m frames with interval n, starting from idx
+        long_term_target_indices = []
+        if m>0 and n>0:
+            for i in range(m):
+                long_term_target_indices.append(idx - (i*n))
+
+        # 3. Get the combined set of unique indices needed for data fetching
+        all_target_indices = set(short_term_target_indices) | set(long_term_target_indices)
+
+        # 4. Filter ALL index lists to ensure they are within the current scenario's bounds
+        valid_unique_indices = sorted([i for i in all_target_indices if i >= scenario_start_index], reverse=True)
+
+        valid_short_indices = [i for i in short_term_target_indices if i in valid_unique_indices]
+        valid_long_indices = [i for i in long_term_target_indices if i in valid_unique_indices]
+
+        if not valid_unique_indices:
+            return OrderedDict(), [], [], []
+
+        # 5. Retrieve data ONLY for the unique, valid indices
+        select_dict = OrderedDict()
+        # First frame (current) is retrieved with its own pose as reference
+        current_idx = valid_unique_indices[0]
+        base_data_dict, _, cur_timestamp_key = self.retrieve_base_data(current_idx, cur_ego_pose_flag)
+        select_dict[current_idx] = base_data_dict
+
+        assert current_idx == idx, "The first valid index must be the current index"
+        # Retrieve all other past frames
+        for past_idx in valid_unique_indices[1:]:
+            past_data_dict = self.retrieve_base_data_before(scenario_index, past_idx, cur_timestamp_key,
+                                                            cur_ego_pose_flag)
+            select_dict[past_idx] = past_data_dict
+
+        return select_dict, valid_unique_indices, valid_short_indices, valid_long_indices
+
+
 
     @staticmethod
     def extract_timestamps(yaml_files):
