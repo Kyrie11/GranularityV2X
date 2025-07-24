@@ -328,11 +328,11 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
     def collate_batch_train(self, batch):
         batch = [item for item in batch if item is not None]
+        print("batch内容：", batch)
         if not batch: return None
         assert len(batch) == 1, "Batch size must be 1 for history mode."
 
         processed_data_list, unique_indices, short_indices, long_indices = batch[0]
-        print("collate_batch_tarin里的unique index:", unique_indices)
         output_dict_list = self.collate_single_item_history([processed_data_list])
 
         return output_dict_list, unique_indices, short_indices, long_indices
