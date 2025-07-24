@@ -48,7 +48,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         p = self.temporal_config['short_term_memory'] #短期历史帧数
 
         #调用加载长短期历史的函数
-        select_dict, unique_indices, short_indices, long_indices = self.retrieve_long_short_his(
+        select_dict, frame_unique_indices, short_indices, long_indices = self.retrieve_long_short_his(
                                                       idx,
                                                       n=n,
                                                       m=m,
@@ -206,8 +206,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             assert len(set(ego_id_list)) == 1, "The ego id must be same"
         except AssertionError as aeeor:
             print("assert error ego id", ego_id_list)
-        print("unique_indices in getitem:",unique_indices)
-        return processed_data_list, unique_indices, short_indices, long_indices
+
+        return processed_data_list, frame_unique_indices, short_indices, long_indices
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):

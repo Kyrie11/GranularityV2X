@@ -149,7 +149,6 @@ def main():
             collated_data_list, unique_indices, short_indices, long_indices = batch_data_list
             # 1. Create a mapping from an index to its corresponding data
             # This is the crucial step to link indices back to their data
-            print("数据个数为：", len(collated_data_list))
             data_map = {index: data for index, data in zip(unique_indices, collated_data_list)}
             print("unique_indices outside:", unique_indices)
             # 2. Reconstruct the final history lists using the correct indices
