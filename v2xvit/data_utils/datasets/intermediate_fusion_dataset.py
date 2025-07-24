@@ -55,8 +55,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                                                       p=p,
                                                       cur_ego_pose_flag=self.cur_ego_pose_flag)
 
-        index = select_dict.keys()
-        print("select_dict的index：",index)
 
         if not select_dict:
             return None
@@ -334,6 +332,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         assert len(batch) == 1, "Batch size must be 1 for history mode."
 
         processed_data_list, unique_indices, short_indices, long_indices = batch[0]
+        print("collate_batch_tarin里的unique index:", unique_indices)
         output_dict_list = self.collate_single_item_history([processed_data_list])
 
         return output_dict_list, unique_indices, short_indices, long_indices
