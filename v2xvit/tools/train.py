@@ -154,7 +154,6 @@ def main():
             long_his_data = []
             record_len = batch_data_list[0]['ego']['record_len']
             print("第0帧的时间戳：", batch_data_list[0]['ego']['agent_timestamps'])
-
             historical_ego_indices = ego_indices_batch[0]
             for j, frame_data in enumerate(historical_data):
                 # The ego timestamp for this frame is the j-th element in the historical index list
@@ -179,6 +178,7 @@ def main():
                         long_his_data.append(historical_data[frame_index])
 
             current_data = batch_data_list[0]
+            print(f"voxel_features:{current_data['ego'][['processed_lidar']['voxel_features']]}")
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()
