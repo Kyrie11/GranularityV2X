@@ -100,7 +100,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 # Calculate and append delay and the absolute timestamp
                 if i == 0:  # This is the Ground Truth frame
                     time_delay.append(0.0)
-                    agent_timestamps.append(current_timestamp)
+                    agent_timestamps.append(float(current_timestamp))
                 else:  # This is a historical frame
                     frame_delay = float(agent_delays[cav_id])
                     time_delay.append(frame_delay)
