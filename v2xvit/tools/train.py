@@ -152,13 +152,13 @@ def main():
             long_his_data = []
             record_len = batch_data_list[0]['ego']['record_len']
             print("第0帧的时间戳：", batch_data_list[0]['ego']['agent_timestamps'])
-            print(f"每个车的延迟分别为{batch_data_list[0]['ego']['time_delay']}")
+
             historical_ego_indices = ego_indices_batch[0]
             for j, frame_data in enumerate(historical_data):
                 # The ego timestamp for this frame is the j-th element in the historical index list
                 ego_ts_for_frame = historical_ego_indices[j].item()
                 agent_ts_list = frame_data['ego']['agent_timestamps']
-
+                print(f"每个车的延迟分别为{frame_data['ego']['time_delay']}")
                 print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
                 print(f"  > Agent Timestamps: {agent_ts_list}")
             print(f"historical_ego_indices={historical_ego_indices}")
