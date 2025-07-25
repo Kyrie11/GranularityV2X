@@ -151,6 +151,7 @@ def main():
             short_his_data = historical_data[:n]
             long_his_data = []
 
+            print("第0帧的时间戳：", batch_data_list[0]['ego']['agent_timestamps'])
             historical_ego_indices = ego_indices_batch[0]
             for j, frame_data in enumerate(historical_ego_indices):
                 # The ego timestamp for this frame is the j-th element in the historical index list
