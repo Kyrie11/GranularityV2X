@@ -86,8 +86,7 @@ class ResNetBEVBackbone(nn.Module):
 
         x = self.resnet(spatial_features)  # tuple of features
         ups = []
-        for index in range(len(x)):
-            print(f"第{index}个的feature的shape是：",x[index].shape)
+
         for i in range(self.num_levels):
             if len(self.deblocks) > 0:
                 ups.append(self.deblocks[i](x[i]))
