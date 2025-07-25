@@ -86,7 +86,7 @@ class ResNetBEVBackbone(nn.Module):
 
         x = self.resnet(spatial_features)  # tuple of features
         ups = []
-        print("第一个resnet的x的shape是：", x[0].shape)
+
         for i in range(self.num_levels):
             if len(self.deblocks) > 0:
                 ups.append(self.deblocks[i](x[i]))
