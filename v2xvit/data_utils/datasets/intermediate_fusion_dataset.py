@@ -77,13 +77,12 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             pairwise_t_matrix = self.get_pairwise_transformation(base_data_dict, self.max_cav)
 
             processed_features, object_stack, object_id_stack = [], [], []
-            velocity, infra, spatial_correction_matrix = [], [], []
-
-            # We also need to store the delays for agents in this snapshot
-            delay_in_frames = []
+            velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
 
             # Loop over only the CAVs that were determined to be in range
             for cav_id in cav_id_list:
+                if cav_id not in base_data_dict:
+                    continue
                 selected_cav_base = base_data_dict[cav_id]
                 selected_cav_processed, void_lidar = self.get_item_single_car(
                     selected_cav_base, ego_lidar_pose)
@@ -97,9 +96,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 velocity.append(selected_cav_processed['velocity'])
                 spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
                 infra.append(1 if int(cav_id) < 0 else 0)
+                time_delay.append(float(agent_delays[cav_id]))
 
-                # Append the pre-calculated delay for this agent
-                delay_in_frames.append(agent_delays[cav_id])
 
             # If no agents are left in this snapshot, skip it
             if not processed_features:
@@ -123,26 +121,30 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             label_dict = self.post_processor.generate_label(
                 gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
 
-            # Padding for velocity, infra, etc.
-            velocity = velocity + (self.max_cav - len(velocity)) * [0.]
-            infra = infra + (self.max_cav - len(infra)) * [0.]
-            delay_in_frames = delay_in_frames + (self.max_cav - len(delay_in_frames)) * [0]  # Also pad delay
+            # Padding for all lists to max_cav length
+            velocity += (self.max_cav - len(velocity)) * [0.]
+            time_delay += (self.max_cav - len(time_delay)) * [0.]  # Also pad delay
+            infra += (self.max_cav - len(infra)) * [0.]
 
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
             padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
             spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
 
+            # Update the final dictionary for this snapshot
             processed_data_dict['ego'].update({
-                'object_bbx_center': object_bbx_center, 'object_bbx_mask': mask,
-                'processed_lidar': merged_feature_dict, 'label_dict': label_dict,
-                'cav_num': cav_num, 'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix,
+                'object_bbx_center': object_bbx_center,
+                'object_bbx_mask': mask,
+                'object_ids': [object_id_stack[i] for i in unique_indices],
                 'anchor_box': anchor_box,
-                'velocity': velocity, 'infra': infra,
-                'delay': delay_in_frames,  # Add the padded delay list here
-                'object_ids': [object_id_stack[i] for i in unique_indices]
+                'processed_lidar': merged_feature_dict,
+                'label_dict': label_dict,
+                'cav_num': cav_num,
+                'velocity': velocity,
+                'time_delay': time_delay,  # This is now correctly included
+                'infra': infra,
+                'spatial_correction_matrix': spatial_correction_matrix,
+                'pairwise_t_matrix': pairwise_t_matrix
             })
-
             processed_data_list.append(processed_data_dict)
 
         # Add the ego's historical timeline to the output
