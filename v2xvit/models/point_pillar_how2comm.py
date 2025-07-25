@@ -142,7 +142,7 @@ class PointPillarHow2comm(nn.Module):
             g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
             print("vox_bev.shape=", g1.shape)
             psm = self.cls_head(spatial_features_2d)
-            rm = self.regroup(spatial_features_2d)
+            rm = self.reg_head(spatial_features_2d)
             g3 = self.get_g3_bev(psm, rm)
             print("det_bev.shape=", g3.shape)
             batch_dict_list.append(batch_dict)
