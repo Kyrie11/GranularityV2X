@@ -369,7 +369,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 spatial_correction_matrix_list.append(data['ego']['spatial_correction_matrix'])
 
             # Collate the stacked agent data into tensors
-            merged_feature_dict = merge_features_to_dict(processed_lidar_list)
+            merged_feature_dict = self.merge_features_to_dict(processed_lidar_list)
             velocity_list = torch.from_numpy(np.array(velocity_list)).float()
             time_delay_list = torch.from_numpy(np.array(time_delay_list)).float()
             infra_list = torch.from_numpy(np.array(infra_list)).float()
