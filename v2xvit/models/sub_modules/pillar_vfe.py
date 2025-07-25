@@ -1,45 +1,11 @@
 """
 Pillar VFE, credits to OpenPCDet.
 """
-from os import device_encoding
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class CustomPointScatter(nn.Module):
-    def __init__(self, grid_size, C_bev):
-        super().__init__()
-        self.nx, self.ny, self.nz = grid_size
-        assert self.nz == 1
-        self.C_bev = C_bev
-
-    def forward(self, point_features, voxel_coords):
-        '''
-        :param point_features: [N_pillars, N_points, C_point]
-        :param voxel_coords:   [N_pillars, 4] => [batch_idx, z, y, x]
-        :return:
-        '''
-
-        N_pillars, N_points, C_point = point_features.shape
-        B = voxel_coords[:, 0].max().item() + 1
-        H, W = int(self.ny), int(self.nx)
-
-        #Step1:聚合每个pillar内部点的特征
-        pillar_bev_feat = point_features.mean(dim=1) #[N_pillars, C_point]
-        C_bev = pillar_bev_feat.shape[1]
-
-        #Step2:创建空的BEV特征图
-        spatial_features = torch.zeros((B, C_bev, H, W),
-                                       dtype=point_features.dtype,
-                                       device=point_features.device)
-
-        # Step 3: 将pillar特征scatter到对应位置
-        for i in range(N_pillars):
-            b, z, y, x = voxel_coords[i]
-            spatial_features[b, :, y, x] = pillar_bev_feat[i]
-
-        return spatial_features
 
 class PFNLayer(nn.Module):
     def __init__(self,
@@ -69,7 +35,7 @@ class PFNLayer(nn.Module):
             part_linear_out = [self.linear(
                 inputs[num_part * self.part:(num_part + 1) * self.part])
                 for num_part in range(num_parts + 1)]
-            x = torch.cat(part_linear_out, dim=0, device=inputs.device)
+            x = torch.cat(part_linear_out, dim=0)
         else:
             x = self.linear(inputs)
         torch.backends.cudnn.enabled = False
@@ -122,14 +88,6 @@ class PillarVFE(nn.Module):
         self.y_offset = self.voxel_y / 2 + point_cloud_range[1]
         self.z_offset = self.voxel_z / 2 + point_cloud_range[2]
 
-        self.nx = - point_cloud_range[0] / self.voxel_x * 2
-        self.ny = - point_cloud_range[1] / self.voxel_y * 2
-        self.nz = 1
-
-        self.num_bev_features = 8
-        self.grid_size_x = round((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0])
-        self.grid_size_y = round((point_cloud_range[4] - point_cloud_range[1]) / voxel_size[1])
-
     def get_output_feature_dim(self):
         return self.num_filters[-1]
 
@@ -149,16 +107,6 @@ class PillarVFE(nn.Module):
         voxel_features, voxel_num_points, coords = \
             batch_dict['voxel_features'], batch_dict['voxel_num_points'], \
             batch_dict['voxel_coords']
-
-        if torch.isnan(coords).any() or torch.isinf(coords).any():
-            print("!!! FATAL: Found NaN or Inf in coords tensor!")
-            print(coords)  # 打印出有问题的coords以供分析
-            # 你可以选择在这里抛出异常，以便立即定位问题
-            raise ValueError("NaN/Inf in coords")
-
-        record_len = batch_dict['record_len']
-        batch_size = len(record_len)
-
         points_mean = \
             voxel_features[:, :, :3].sum(dim=1, keepdim=True) / \
             voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
@@ -186,70 +134,13 @@ class PillarVFE(nn.Module):
             features.append(points_dist)
         features = torch.cat(features, dim=-1)
 
-        # C = features.shape[2]
-        # scatter = CustomPointScatter(grid_size=(self.nx, self.ny, self.nz), C_bev=C)
-        # vox_bev = scatter(features, coords)
-        # batch_dict['vox_bev'] = vox_bev
         voxel_count = features.shape[1]
-        mask = self.get_paddings_indicator(voxel_num_points, voxel_count, axis=0)
+        mask = self.get_paddings_indicator(voxel_num_points, voxel_count,
+                                           axis=0)
         mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
         features *= mask
         for pfn in self.pfn_layers:
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
-
-        #点数(num of points)
-        num_points_norm = voxel_num_points.view(-1, 1).float() / voxel_count
-        #为了安全的除法， 防止体素中点数为0
-        safe_voxel_num_points = voxel_num_points.view(-1, 1).float().clamp(min=1.0)
-        #提取x,y,z,intensity
-        points_xyz = voxel_features[:, :, :3]
-        points_intensity = voxel_features[:, :, 3:4]
-
-        #平均激光雷达强度
-        sum_intensity = (points_intensity * mask).sum(dim=1)
-        mean_intensity = sum_intensity / safe_voxel_num_points
-
-        #平均高度
-        sum_height = (points_xyz[:, :, 2:3] * mask).sum(dim=1)
-        mean_height = sum_height / safe_voxel_num_points
-
-        #最高点高度
-        max_height = (points_xyz[:,:,2:3] * mask+(1-mask)*-1e6).max(dim=1)[0]
-        #高度跨度(Height Span)
-        min_height = (points_xyz[:, :, 2:3] * mask + (1 - mask) * 1e6).min(dim=1)[0]
-        height_span = max_height - min_height
-
-        #点坐标方差
-        pillar_points_mean = (points_xyz * mask).sum(dim=1, keepdim=True) / safe_voxel_num_points.view(-1, 1, 1)
-        points_sqr_dist = ((points_xyz - pillar_points_mean)**2 * mask).sum(dim=1) / safe_voxel_num_points.view(-1, 1)
-        var_x = points_sqr_dist[:, 0:1]
-        var_y = points_sqr_dist[:, 1:2]
-        var_z = points_sqr_dist[:, 2:3]
-
-        # 将所有手工设计的特征拼接在一起
-        # 8个特征: [点数, 平均强度, 平均高度, 最高点高度, 高度跨度, x方差, y方差, z方差]
-        pillar_bev_features = torch.cat([
-            num_points_norm, mean_intensity, mean_height, max_height,
-            height_span, var_x, var_y, var_z
-        ], dim=1)
-        # print("pillar_bev_features.shape=", pillar_bev_features.shape)
-
-        total_num_agents = coords[:,0].max().int().item() + 1
-        vox_bev = torch.zeros(
-            total_num_agents,
-            self.num_bev_features,
-            self.grid_size_y,
-            self.grid_size_x,
-            device = voxel_features.device)
-
-        agent_indices = coords[:, 0].long()
-        y_indices = coords[:, 2].long()
-        x_indices = coords[:, 3].long()
-
-        vox_bev[agent_indices, :, y_indices, x_indices] = pillar_bev_features
-        batch_dict['vox_bev'] = vox_bev
-        # print("vox_bev.shape=", vox_bev.shape)
-
         return batch_dict
