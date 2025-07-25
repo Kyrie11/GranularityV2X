@@ -35,41 +35,41 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         n = self.params['train_params']['lsh']['n']
         p = self.params['train_params']['lsh']['p']
 
-        # 2. New retrieval call. Also gets agent_delays and the ego's timeline.
-        base_data_list, agent_delays, ego_target_indices = \
-            self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=self.cur_ego_pose_flag)
+        # 2. Generate the "Ground Truth" frame for t=0
+        gt_base_data_dict, _, current_timestamp = self.retrieve_base_data(idx, cur_ego_pose_flag=True)
+        # 3. Generate the realistic, delayed historical frames
+        # This call now uses cur_ego_pose_flag=False to apply real-world delays.
+        historical_base_data_list, agent_delays, ego_historical_indices = \
+            self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=False)
+        # 4. Combine them: GT frame is at index 0, history starts at index 1.
+        base_data_list = [gt_base_data_dict] + historical_base_data_list
 
         processed_data_list = []
         ego_id = -1
-        ego_lidar_pose = []
 
-        # 3. Use the CURRENT snapshot (the first in the list) to determine ego info and communication range
-        current_data_dict = base_data_list[0]
+        # 5. Establish 'Ground Truth' ego pose and communication range from the GT frame
+        # This must be done only once, based on the true state at t=0.
+        ego_lidar_pose = []
         cav_id_list = []
 
-        for cav_id, cav_content in current_data_dict.items():
+        for cav_id, cav_content in gt_base_data_dict.items():
             if cav_content['ego']:
                 ego_id = cav_id
-                # The 'lidar_pose' in params is the delayed pose. We need the current one for range check.
-                # We can get it from the 'gt_transformation_matrix' which transforms from current agent pose to current ego pose.
-                # A simpler way is to just calculate distance based on the poses used for transformation.
-                ego_lidar_pose = cav_content['params']['lidar_pose']  # This is fine as ego delay is 0.
+                ego_lidar_pose = cav_content['params']['lidar_pose']
                 break
 
-        assert ego_id != -1
-        assert len(ego_lidar_pose) > 0
+        assert ego_id != -1, "Ego vehicle not found in the GT snapshot"
 
-        # Determine which CAVs are in range at the current moment
-        for cav_id, selected_cav_base in current_data_dict.items():
-            # As before, pose is from agent's (potentially delayed) frame. This is what matters.
+        for cav_id, selected_cav_base in gt_base_data_dict.items():
             cav_lidar_pose = selected_cav_base['params']['lidar_pose']
-            distance = math.sqrt((cav_lidar_pose[0] - ego_lidar_pose[0]) ** 2 +
-                                 (cav_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
+            distance = math.sqrt(
+                (cav_lidar_pose[0] - ego_lidar_pose[0]) ** 2 + (cav_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
             if distance <= v2xvit.data_utils.datasets.COM_RANGE:
                 cav_id_list.append(cav_id)
 
+
         # 4. Now, process EACH historical snapshot from the list
-        for base_data_dict in base_data_list:
+        for i, base_data_dict in enumerate(base_data_list):
             processed_data_dict = OrderedDict()
             processed_data_dict['ego'] = {}
 
@@ -79,7 +79,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             processed_features, object_stack, object_id_stack = [], [], []
             velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
 
-            # Loop over only the CAVs that were determined to be in range
+            # Use the single cav_id_list determined from the GT frame
             for cav_id in cav_id_list:
                 if cav_id not in base_data_dict:
                     continue
@@ -96,7 +96,11 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 velocity.append(selected_cav_processed['velocity'])
                 spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
                 infra.append(1 if int(cav_id) < 0 else 0)
-                time_delay.append(float(agent_delays[cav_id]))
+                # ** CRITICAL CHANGE: Set delay based on frame type **
+                if i == 0:  # This is the Ground Truth frame
+                    time_delay.append(0.0)
+                else:  # This is a historical frame
+                    time_delay.append(float(agent_delays[cav_id]))
 
 
             # If no agents are left in this snapshot, skip it
@@ -148,7 +152,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             processed_data_list.append(processed_data_dict)
 
         # Add the ego's historical timeline to the output
-        return processed_data_list, ego_target_indices
+        return processed_data_list, ego_historical_indices
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):

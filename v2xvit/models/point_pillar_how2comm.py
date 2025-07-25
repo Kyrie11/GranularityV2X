@@ -99,16 +99,40 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, short_term, long_term):
-        short_his_g1, short_his_g2, short_his_g3 = [], [], []
-        batch_dict_list = []
-        feature_list = []
-        feature_2d_list = []
-        matrix_list = []
-        regroup_feature_list = []
-        regroup_feature_list_large = []
+        current_data_dict = short_term[0]['ego']
+        delay = current_data_dict['time_delay']
+        pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
+        record_len = current_data_dict['record_len']
+        short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
+        long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
+        short_his = [short_his_g1, short_his_g2, short_his_g3]
+        long_his = [long_his_g1, long_his_g2, long_his_g3]
 
-        for origin_data in short_term:
-            data_dict = origin_data['ego']
+        g1_data = short_his_g1[0]
+        g2_data = short_his_g2[0]
+        g3_data = short_his_g3[0]
+
+        if len(long_term) <= 1:
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+                g1_data=g1_data, g2_data=g2_data, g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
+        else:
+            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+                g1_data=g1_data, g2_data=g2_data, g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, short_his=short_his, long_his=long_his)
+        print("fused_feat_list.shape=",fused_feature.shape)
+        # if self.shrink_flag:
+        #     fused_feature = self.shrink_conv(fused_feature)
+
+        psm = self.cls_head(fused_feature)
+        rm = self.reg_head(fused_feature)
+        output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
+        return output_dict
+        return None
+
+    def get_histroy_granularity(self, history):
+        his_g1, his_g2, his_g3 = [], [], []
+        matrix_list = []
+        for origin_frame in history:
+            data_dict = origin_frame['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
@@ -121,12 +145,9 @@ class PointPillarHow2comm(nn.Module):
                           'record_len': record_len}
             # n, 4 -> n, c encoding voxel feature using point-pillar method
             batch_dict = self.pillar_vfe(batch_dict)
-            # n, c -> N, C, H, W
             batch_dict = self.scatter(batch_dict)
             batch_dict = self.backbone(batch_dict)
-            # N, C, H', W'
             spatial_features_2d = batch_dict['spatial_features_2d']
-
             # downsample feature to reduce memory
             if self.shrink_flag:
                 spatial_features_2d = self.shrink_conv(spatial_features_2d)
@@ -138,50 +159,16 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
-
-            batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
-            feature_list.append(spatial_features)
-            feature_2d_list.append(spatial_features_2d)
+            his_g2.append(spatial_features)
             matrix_list.append(pairwise_t_matrix)
-            regroup_feature_list.append(self.regroup(
-                spatial_features_2d, record_len))
-            regroup_feature_list_large.append(
-                self.regroup(spatial_features, record_len))
-
-            print("spatial_features.shape=", spatial_features.shape)
-            print("spatial_features_2d.shape=", spatial_features_2d.shape)
             g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
             print("vox_bev.shape=", g1.shape)
-            psm = self.cls_head(spatial_features)
-            rm = self.reg_head(spatial_features)
+            psm = self.cls_head(spatial_features_2d)
+            rm = self.reg_head(spatial_features_2d)
             g3 = self.get_g3_bev(psm, rm)
-            print("det_bev.shape=", g3.shape)
-
-        pairwise_t_matrix = matrix_list[0].clone().detach()
-
-        history_feature = transform_feature(regroup_feature_list_large, self.delay)
-        spatial_features = feature_list[0]
-        spatial_features_2d = feature_2d_list[0]
-        batch_dict = batch_dict_list[0]
-        record_len = batch_dict['record_len']
-        psm_single = self.cls_head(spatial_features_2d)
-
-        # if delay == 0:
-        #     fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-        #         g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
-        # elif delay > 0:
-        #     fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-        #         g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
-        # print("fused_feat_list.shape=",fused_feature.shape)
-        # # if self.shrink_flag:
-        # #     fused_feature = self.shrink_conv(fused_feature)
-        #
-        # psm = self.cls_head(fused_feature)
-        # rm = self.reg_head(fused_feature)
-        # output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
-        # return output_dict
-        return None
+            his_g3.append(g3)
+        return his_g1, his_g2, his_g3
 
     def get_g1_bev(self, voxel_features, voxel_num_points, coords):
         max_points = voxel_features.shape[1]

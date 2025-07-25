@@ -38,7 +38,6 @@ def main():
     n = hypes['train_params']['lsh']['n']
     m = hypes['train_params']['lsh']['m']
     p = hypes['train_params']['lsh']['p']
-    batch_size = hypes['train_params']['batch_size']
 
     multi_gpu_utils.init_distributed_mode(opt)
 
@@ -146,33 +145,28 @@ def main():
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-            print("单帧数据的shape为：{batch_data_list[i].shape}")
-            short_his_data = batch_data_list[:n]
 
+            historical_data = batch_data_list[1:]
+            short_his_data = historical_data[:n]
             long_his_data = []
 
-            for b in range(batch_size):
-                batch_long_his_data = []
-                current_ego_indices = ego_indices_batch[b]
-                print("current_ego_indices：", current_ego_indices)
-                start_index = current_ego_indices[0].item()  # The most recent timestamp
+            historical_ego_indices = ego_indices_batch[0]
+            print(f"historical_ego_indices={historical_ego_indices}")
+            if historical_ego_indices.nelement() > 0:
+                # The timeline starts from the most recent historical frame (e.g., t-1)
+                start_index = historical_ego_indices[0].item()
                 target_long_indices = [start_index - j * p for j in range(m)]
-                print(f"target_long_indices:{target_long_indices}")
-                # 2. Find where these target timestamps are located in our batch data
+
                 for target_idx in target_long_indices:
-                    # Find the position of target_idx in the list of available frames
-                    match_pos = (current_ego_indices == target_idx).nonzero(as_tuple=True)[0]
+                    # Find the position of target_idx in the historical timeline
+                    match_pos = (historical_ego_indices == target_idx).nonzero(as_tuple=True)[0]
                     if match_pos.nelement() > 0:
                         # We found it, now grab the corresponding data snapshot
+                        # The index `frame_index` corresponds to the `historical_data` list
                         frame_index = match_pos.item()
-                        batch_long_his_data.append(batch_data_list[frame_index][b])
-                long_his_data.append(batch_long_his_data)
+                        long_his_data.append(historical_data[frame_index])
 
             current_data = batch_data_list[0]
-            data_dict = current_data['ego']
-            delay_tensor = data_dict['time_delay']
-            print(f"delay_tensor.shape={delay_tensor.shape}")
-            print("delay_tensor:",delay_tensor)
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()
@@ -194,7 +188,7 @@ def main():
                     # first argument is always your output dictionary,
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
-                                       current_data['ego']['label_dict'])
+                                        current_data['ego']['label_dict'])
                     final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)

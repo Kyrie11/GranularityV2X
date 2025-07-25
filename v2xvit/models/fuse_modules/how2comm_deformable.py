@@ -102,8 +102,8 @@ class How2comm(nn.Module):
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
-        g1_short_his, g2_short_his, g3_short_his = short_his
-        g1_long_his, g2_long_his, g3_long_his = long_his
+        short_his_g1, short_his_g2, short_his_g3 = short_his
+        glong_his_g1, long_his_g2, long_his_g3 = long_his
 
         #if short_his and long_his:
 
@@ -112,13 +112,13 @@ class How2comm(nn.Module):
             with_resnet = True if hasattr(backbone, 'resnet') else False
             if with_resnet:
                 g2_feats = backbone.resnet(g2_data)
-                g2_short_feats = backbone.resnet(g2_short_his)
-                g2_long_feats = backbone.resnet(g2_long_his)
+                # g2_short_feats = backbone.resnet(g2_short_his)
+                # g2_long_feats = backbone.resnet(g2_long_his)
 
             for i in range(self.num_levels):
                 g2_data = g2_feats[i] if with_resnet else backbone.blocks[i](g2_data)
-                g2_short_his = g2_short_feats[i] if with_resnet else backbone.blocks[i](g2_short_his)
-                g2_long_his = g2_long_feats[i] if with_resnet else backbone.blocks[i](g2_long_his)
+                # g2_short_his = g2_short_feats[i] if with_resnet else backbone.blocks[i](g2_short_his)
+                # g2_long_his = g2_long_feats[i] if with_resnet else backbone.blocks[i](g2_long_his)
 
                 if i == 0:
                     if self.communication:
