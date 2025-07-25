@@ -46,12 +46,23 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         historical_base_data_list, agent_delays, ego_historical_indices = \
             self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=False)
 
+        # If, for some reason, the retrieval fails (e.g., idx at the very beginning of the dataset)
+        if not historical_base_data_list:
+            return [], []
+
+        # The current timestamp is the first timestamp in the ego's historical sequence.
+        current_timestamp = ego_historical_indices[0]
+
+        # This will be our final list of all processed frames.
+        final_processed_list = []
         # 4. Combine them: GT frame at index 0, history starts at index 1
         base_data_list = [gt_base_data_dict] + historical_base_data_list
 
-        processed_data_list = []
-        ego_id = -1
+        # 3. ## CONSTRUCT THE GROUND TRUTH FRAME ##
+        # We use the data for t_0 (the first item in our retrieved list) as the base.
+        gt_base_data_dict = historical_base_data_list[0]
 
+        ego_id = -1
         # 5. Establish 'Ground Truth' ego pose and communication range
         ego_lidar_pose = []
         cav_id_list = []
@@ -69,88 +80,105 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             if distance <= v2xvit.data_utils.datasets.COM_RANGE:
                 cav_id_list.append(cav_id)
 
-        # 6. Process EACH frame in the combined list (GT + History)
-        for i, base_data_dict in enumerate(base_data_list):
-            processed_data_dict = OrderedDict({'ego': {}})
-            pairwise_t_matrix = self.get_pairwise_transformation(base_data_dict, self.max_cav)
+        # Process this single GT frame with forced zero delay
+        gt_processed_dict = self.process_single_frame(
+            gt_base_data_dict, cav_id_list, ego_lidar_pose,
+            is_gt_frame=True, current_timestamp=current_timestamp
+        )
+        if gt_processed_dict:
+            final_processed_list.append(gt_processed_dict)
 
-            processed_features, object_stack, object_id_stack = [], [], []
-            velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
+            # 4. ## CONSTRUCT THE REALISTIC HISTORICAL FRAMES ##
+            for i, base_data_dict in enumerate(historical_base_data_list):
+                ego_ts_for_this_frame = ego_historical_indices[i]
 
-            agent_timestamps = []
+                # Process each historical frame with its real delays
+                historical_processed_dict = self.process_single_frame(
+                    base_data_dict, cav_id_list, ego_lidar_pose,
+                    is_gt_frame=False, current_timestamp=ego_ts_for_this_frame,
+                    agent_delays=agent_delays
+                )
+                if historical_processed_dict:
+                    final_processed_list.append(historical_processed_dict)
 
-            for cav_id in cav_id_list:
-                if cav_id not in base_data_dict:
-                    continue
+            # The returned indices correspond to the historical part of the list
+            return final_processed_list, ego_historical_indices
 
-                selected_cav_base = base_data_dict[cav_id]
-                selected_cav_processed, void_lidar = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
+    def process_single_frame(self, base_data_dict, cav_id_list, ego_lidar_pose,
+                             is_gt_frame, current_timestamp, agent_delays=None):
+        """
+        Helper function to process a single frame dict, either as GT or History.
+        This avoids code duplication.
+        """
+        processed_data_dict = OrderedDict({'ego': {}})
+        pairwise_t_matrix = self.get_pairwise_transformation(base_data_dict, self.max_cav)
 
-                if void_lidar:
-                    continue
+        processed_features, object_stack, object_id_stack = [], [], []
+        velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
+        agent_timestamps = []
 
-                # Append standard data
-                object_stack.append(selected_cav_processed['object_bbx_center'])
-                object_id_stack += selected_cav_processed['object_ids']
-                processed_features.append(selected_cav_processed['processed_features'])
-                velocity.append(selected_cav_processed['velocity'])
-                spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
-                infra.append(1 if int(cav_id) < 0 else 0)
-
-                # Calculate and append delay and the absolute timestamp
-                if i == 0:  # This is the Ground Truth frame
-                    time_delay.append(0.0)
-                    agent_timestamps.append(float(current_timestamp))
-                else:  # This is a historical frame
-                    frame_delay = float(agent_delays[cav_id])
-                    time_delay.append(frame_delay)
-
-                    # ego_historical_indices is a list of ints, not a tensor. No .item() needed.
-                    ego_timestamp_for_this_frame = ego_historical_indices[i - 1]
-                    agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
-                    agent_timestamps.append(agent_absolute_timestamp)
-
-            if not processed_features:
+        for cav_id in cav_id_list:
+            if cav_id not in base_data_dict:
                 continue
 
-            # ... (Post-processing logic remains unchanged) ...
-            unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
-            object_stack = np.vstack(object_stack)[unique_indices]
-            object_bbx_center = np.zeros((self.params['postprocess']['max_num'], 7))
-            mask = np.zeros(self.params['postprocess']['max_num'])
-            object_bbx_center[:object_stack.shape[0], :] = object_stack
-            mask[:object_stack.shape[0]] = 1
-            cav_num = len(processed_features)
-            merged_feature_dict = self.merge_features_to_dict(processed_features)
-            anchor_box = self.post_processor.generate_anchor_box()
-            label_dict = self.post_processor.generate_label(
-                gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
-            velocity += (self.max_cav - len(velocity)) * [0.]
-            time_delay += (self.max_cav - len(time_delay)) * [0.]
-            infra += (self.max_cav - len(infra)) * [0.]
-            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0.]
-            spatial_correction_matrix = np.stack(spatial_correction_matrix)
-            padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
-            spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
+            selected_cav_base = base_data_dict[cav_id]
+            selected_cav_processed, void_lidar = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
+            if void_lidar:
+                continue
 
-            processed_data_dict['ego'].update({
-                'object_bbx_center': object_bbx_center,
-                'object_bbx_mask': mask,
-                'object_ids': [object_id_stack[i] for i in unique_indices],
-                'anchor_box': anchor_box,
-                'processed_lidar': merged_feature_dict,
-                'label_dict': label_dict,
-                'cav_num': cav_num,
-                'velocity': velocity,
-                'time_delay': time_delay,
-                'infra': infra,
-                'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix,
-                'agent_timestamps': agent_timestamps
-            })
-            processed_data_list.append(processed_data_dict)
+            # ... append standard data ...
+            object_stack.append(selected_cav_processed['object_bbx_center'])
+            object_id_stack += selected_cav_processed['object_ids']
+            processed_features.append(selected_cav_processed['processed_features'])
+            velocity.append(selected_cav_processed['velocity'])
+            spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
+            infra.append(1 if int(cav_id) < 0 else 0)
 
-        return processed_data_list, ego_historical_indices
+            # Calculate delay and timestamp based on frame type
+            if is_gt_frame:
+                time_delay.append(0.0)
+                agent_timestamps.append(float(current_timestamp))
+            else:
+                frame_delay = float(agent_delays[cav_id])
+                time_delay.append(frame_delay)
+                agent_absolute_timestamp = float(current_timestamp) - frame_delay
+                agent_timestamps.append(agent_absolute_timestamp)
+
+        if not processed_features:
+            return None  # Return None if frame is empty after processing
+
+        # ... (All post-processing, padding, and dictionary creation logic is the same) ...
+        # ... (This part is identical to the end of your previous __getitem__) ...
+        unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
+        # ... stacking, masking, label generation, padding...
+        object_stack = np.vstack(object_stack)[unique_indices]
+        object_bbx_center = np.zeros((self.params['postprocess']['max_num'], 7))
+        mask = np.zeros(self.params['postprocess']['max_num'])
+        object_bbx_center[:object_stack.shape[0], :] = object_stack
+        mask[:object_stack.shape[0]] = 1
+        cav_num = len(processed_features)
+        merged_feature_dict = self.merge_features_to_dict(processed_features)
+        anchor_box = self.post_processor.generate_anchor_box()
+        label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
+        velocity += (self.max_cav - len(velocity)) * [0.]
+        time_delay += (self.max_cav - len(time_delay)) * [0.]
+        infra += (self.max_cav - len(infra)) * [0.]
+        agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0.]
+        spatial_correction_matrix = np.stack(spatial_correction_matrix)
+        padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
+        spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
+
+        processed_data_dict['ego'].update({
+            'object_bbx_center': object_bbx_center, 'object_bbx_mask': mask,
+            'object_ids': [object_id_stack[i] for i in unique_indices],
+            'anchor_box': anchor_box, 'processed_lidar': merged_feature_dict,
+            'label_dict': label_dict, 'cav_num': cav_num, 'velocity': velocity,
+            'time_delay': time_delay, 'infra': infra,
+            'spatial_correction_matrix': spatial_correction_matrix,
+            'pairwise_t_matrix': pairwise_t_matrix,
+            'agent_timestamps': agent_timestamps
+        })
+        return processed_data_dict
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):
