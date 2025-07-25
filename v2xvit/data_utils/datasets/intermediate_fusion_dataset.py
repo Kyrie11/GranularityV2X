@@ -298,7 +298,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 origin_lidar = []
 
             for i in range(len(batch)): 
-                ego_dict = batch[i][j]['ego']
+                ego_dict = batch[i][0][j]['ego']
                 object_bbx_center.append(ego_dict['object_bbx_center'])
                 object_bbx_mask.append(ego_dict['object_bbx_mask'])
                 object_ids.append(ego_dict['object_ids'])
