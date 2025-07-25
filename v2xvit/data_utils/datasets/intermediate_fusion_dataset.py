@@ -266,36 +266,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         return selected_cav_processed, void_lidar
 
-    @staticmethod
-    def merge_features_to_dict(processed_feature_list):
-        """
-        Merge the preprocessed features from different cavs to the same
-        dictionary.
 
-        Parameters
-        ----------
-        processed_feature_list : list
-            A list of dictionary containing all processed features from
-            different cavs.
-
-        Returns
-        -------
-        merged_feature_dict: dict
-            key: feature names, value: list of features.
-        """
-
-        merged_feature_dict = OrderedDict()
-
-        for i in range(len(processed_feature_list)):
-            for feature_name, feature in processed_feature_list[i].items():
-                if feature_name not in merged_feature_dict:
-                    merged_feature_dict[feature_name] = []
-                if isinstance(feature, list):
-                    merged_feature_dict[feature_name] += feature
-                else:
-                    merged_feature_dict[feature_name].append(feature)
-
-        return merged_feature_dict
 
     @staticmethod
     def merge_features_to_dict(processed_feature_list):
@@ -357,6 +328,10 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             # Create a temporary list of data for the current frame from all samples in the batch
             frame_batch = [sample_frames[frame_idx] for sample_frames in processed_data_list_batch]
 
+            voxel_features_list = []
+            voxel_coords_list = []
+            voxel_num_points_list = []
+
             # Initialize lists to gather data from all samples for this frame
             object_bbx_center_list = []
             object_bbx_mask_list = []
@@ -375,7 +350,19 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             agent_timestamps_list = []
 
             # Now, loop through the data for each sample *within this specific frame*
-            for data in frame_batch:
+            for i, data in enumerate(frame_batch):
+                # Extract the pre-merged lidar dict for this sample
+                lidar_dict = data['ego']['processed_lidar']
+                # Append the voxel features and num_points directly
+                voxel_features_list.append(lidar_dict['voxel_features'])
+                voxel_num_points_list.append(lidar_dict['voxel_num_points'])
+                # CRITICAL: Add the batch index 'i' to the voxel coordinates
+                coords = lidar_dict['voxel_coords']
+                batch_index_column = np.full((coords.shape[0], 1), i)
+                # new_coords shape will be (N, 4) -> (z, y, x, batch_idx)
+                new_coords = np.hstack([coords, batch_index_column])
+                voxel_coords_list.append(new_coords)
+
                 # Data that is batched at the "sample" level
                 object_bbx_center_list.append(data['ego']['object_bbx_center'])
                 object_bbx_mask_list.append(data['ego']['object_bbx_mask'])
@@ -396,8 +383,19 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 pairwise_t_matrix_list.append(data['ego']['pairwise_t_matrix'])
                 spatial_correction_matrix_list.append(data['ego']['spatial_correction_matrix'])
 
+            # 3. Concatenate the lists of numpy arrays into single, large batched arrays
+            batched_voxel_features = np.concatenate(voxel_features_list, axis=0)
+            batched_voxel_coords = np.concatenate(voxel_coords_list, axis=0)
+            batched_voxel_num_points = np.concatenate(voxel_num_points_list, axis=0)
+
+            # 4. Create the final dictionary, converting numpy arrays to Torch tensors
+            batched_lidar_dict = {
+                'voxel_features': torch.from_numpy(batched_voxel_features).float(),
+                'voxel_coords': torch.from_numpy(batched_voxel_coords).long(),  # Coords are usually long integers
+                'voxel_num_points': torch.from_numpy(batched_voxel_num_points).float()
+            }
+
             # Collate the stacked agent data into tensors
-            merged_feature_dict = self.merge_features_to_dict(processed_lidar_list)
             velocity_list = torch.from_numpy(np.array(velocity_list)).float()
             time_delay_list = torch.from_numpy(np.array(time_delay_list)).float()
             infra_list = torch.from_numpy(np.array(infra_list)).float()
@@ -410,7 +408,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 'ego': {
                     'object_bbx_center': torch.from_numpy(np.array(object_bbx_center_list)).float(),
                     'object_bbx_mask': torch.from_numpy(np.array(object_bbx_mask_list)).float(),
-                    'processed_lidar': merged_feature_dict,
+                    'processed_lidar': batched_lidar_dict,
                     'record_len': torch.from_numpy(np.array(record_len)),
                     'velocity': velocity_list,
                     'time_delay': time_delay_list,
