@@ -157,7 +157,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         object_bbx_center[:object_stack.shape[0], :] = object_stack
         mask[:object_stack.shape[0]] = 1
         cav_num = len(processed_features)
-        merged_feature_dict = self.merge_features_to_dict(processed_features)
+
         anchor_box = self.post_processor.generate_anchor_box()
         label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
         velocity += (self.max_cav - len(velocity)) * [0.]
@@ -171,7 +171,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         processed_data_dict['ego'].update({
             'object_bbx_center': object_bbx_center, 'object_bbx_mask': mask,
             'object_ids': [object_id_stack[i] for i in unique_indices],
-            'anchor_box': anchor_box, 'processed_lidar': merged_feature_dict,
+            'anchor_box': anchor_box, 'processed_lidar':processed_features,
             'label_dict': label_dict, 'cav_num': cav_num, 'velocity': velocity,
             'time_delay': time_delay, 'infra': infra,
             'spatial_correction_matrix': spatial_correction_matrix,
@@ -353,15 +353,18 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             for i, data in enumerate(frame_batch):
                 # Extract the pre-merged lidar dict for this sample
                 lidar_dict = data['ego']['processed_lidar']
-                # Append the voxel features and num_points directly
-                voxel_features_list.append(lidar_dict['voxel_features'])
-                voxel_num_points_list.append(lidar_dict['voxel_num_points'])
-                # CRITICAL: Add the batch index 'i' to the voxel coordinates
-                coords = lidar_dict['voxel_coords']
-                batch_index_column = np.full((coords.shape[0], 1), i)
-                # new_coords shape will be (N, 4) -> (z, y, x, batch_idx)
-                new_coords = np.hstack([coords, batch_index_column])
-                voxel_coords_list.append(new_coords)
+                agent_lidar_list = data['ego']['processed_lidar']
+
+                for agent_dict in agent_lidar_list:
+                    voxel_features_list.append(agent_dict['voxel_features'])
+                    voxel_num_points_list.append(agent_dict['voxel_num_points'])
+                    # Get the agent's voxel coordinates
+                    coords = agent_dict['voxel_coords']
+                    # Add the batch index 'i' as a new column
+                    batch_index_column = np.full((coords.shape[0], 1), i)
+                    new_coords = np.hstack([coords, batch_index_column])
+                    # Append the updated coordinates
+                    voxel_coords_list.append(new_coords)
 
                 # Data that is batched at the "sample" level
                 object_bbx_center_list.append(data['ego']['object_bbx_center'])
@@ -369,7 +372,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 object_ids_list.append(data['ego']['object_ids'])
 
                 # Data that is batched at the "agent" level
-                processed_lidar_list.append(data['ego']['processed_lidar'])
                 record_len.append(data['ego']['cav_num'])
 
                 # Extend the lists with per-agent information
