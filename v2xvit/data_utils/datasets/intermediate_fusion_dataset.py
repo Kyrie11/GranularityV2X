@@ -141,6 +141,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
             # Update the final dictionary for this snapshot
             processed_data_dict['ego'].update({
+                'agent_timestamps': agent_timestamps,
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': [object_id_stack[i] for i in unique_indices],
@@ -152,9 +153,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 'time_delay': time_delay,
                 'infra': infra,
                 'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix,
+                'pairwise_t_matrix': pairwise_t_matrix
                 ## NEW ##: Add the list of agent timestamps to the output dictionary
-                'agent_timestamps': agent_timestamps
+
             })
             processed_data_list.append(processed_data_dict)
 
