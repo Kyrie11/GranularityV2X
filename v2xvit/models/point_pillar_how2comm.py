@@ -104,6 +104,8 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
+        print(f"short_his_g1.shape={short_his_g1.shape}")
+        print(f"short_his_g2.shape={short_his_g2.shape}")
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
         short_his = [short_his_g1, short_his_g2, short_his_g3]
         long_his = [long_his_g1, long_his_g2, long_his_g3]
@@ -211,55 +213,56 @@ class PointPillarHow2comm(nn.Module):
             max_height, height_span, x_variance, y_variance, z_variance
         ], dim=1)
 
-        # 5. 将物理特征散射到BEV图上 (借鉴PointPillarScatter的逻辑)
-        # batch_size, H, W 可以从self.scatter获取
-        N = coords[:, 0].max().int().item() + 1
+        # ####################################################################
+        # ## 5. 修正后的散射逻辑 ##############################################
+        # ####################################################################
+        # 从scatter模块获取BEV尺寸信息
+        batch_size = coords[:, 0].max().int().item() + 1
         H_full, W_full = self.scatter.ny, self.scatter.nx
-        downsample_factor = 2
-        H_downsampled, W_downsampled = H_full // downsample_factor, W_full // downsample_factor
+        downsample_factor = 2  # 与backbone的下采样率匹配
+        H_down, W_down = H_full // downsample_factor, W_full // downsample_factor
 
-        # 创建下采样分辨率的BEV画布
-        sum_bev_map = torch.zeros(N, 8, H_downsampled, W_downsampled, dtype=physical_pillar_features.dtype,
+        # 创建空的BEV图用于累加
+        sum_bev_map = torch.zeros(batch_size, 8, H_down, W_down,
+                                  dtype=physical_pillar_features.dtype,
                                   device=physical_pillar_features.device)
-        count_bev_map = torch.zeros(N, 8, H_downsampled, W_downsampled, dtype=physical_pillar_features.dtype,
-                                    device=physical_pillar_features.device)
-        epsilon = 1e-6
+        count_bev_map = torch.zeros_like(sum_bev_map)
 
-        # 准备用于scatter操作的索引
-        # 索引需要是 (N, C, H, W) 的一维展开形式
-        agent_indices = coords[:, 0].view(-1, 1).expand(-1, 8)  # (M, 8)
-        downsampled_coords_y = (coords[:, 2] // downsample_factor).view(-1, 1).expand(-1, 8)
-        downsampled_coords_x = (coords[:, 3] // downsample_factor).view(-1, 1).expand(-1, 8)
+        # 计算每个pillar在下采样BEV图中的一维索引 (所有pillar一起计算)
+        # coords[:, 2] 是 y 坐标, coords[:, 3] 是 x 坐标
+        y_indices = coords[:, 2] // downsample_factor
+        x_indices = coords[:, 3] // downsample_factor
+        # bev_indices 的 shape 是 (M,)
+        bev_indices = (y_indices * W_down + x_indices).long()
 
-        # 将 pillar 特征散射并累加到 sum_bev_map
-        # torch.scatter_add_(dim, index, src) -> self[index[i][j]] += src[i][j]
-        # 我们需要将2D的(y,x)坐标和agent索引组合成一个可以在4D张量上操作的索引
-        # 一个更高效的方法是先在2D的 H*W 上操作，然后 reshape
-        sum_bev_map_flat = sum_bev_map.view(N, 8, H_downsampled, W_downsampled)
-        count_bev_map_flat = count_bev_map.view(N, 8, H_downsampled, W_downsampled)
-
-        # 计算一维的 BEV 索引
-        bev_indices_flat = (downsampled_coords_y * W_downsampled + downsampled_coords_x).long()  # Shape: (M, 8)
-
-        # 散射逻辑保持不变，但现在是在下采样后的网格上操作
-        # 注意：多个原始Pillar可能会映射到同一个下采样后的Pillar。
-        # 这里的简单实现是“后来者覆盖”，即后面的Pillar信息会覆盖前面的
-        for agent_idx in range(N):
-            agent_mask = (coords[:, 0] == agent_idx)
-            if not agent_mask.any():
+        # 遍历批次中的每个样本
+        for i in range(batch_size):
+            # 找到属于当前样本的 pillar
+            sample_mask = (coords[:, 0] == i)
+            if not sample_mask.any():
                 continue
-            # 获取当前 agent 的 pillar 特征和它们的目标索引
-            src = physical_pillar_features[agent_mask]  # (num_pillars, 8)
-            index = bev_indices_flat[agent_mask][:, 0].view(-1, 1).expand(-1, 8)  # (num_pillars, 8)
 
-            # 在该 agent 对应的图层上进行累加
-            sum_bev_map_flat[agent_idx].scatter_add_(dim=1, index=index.T, src=src.T)
-            # 计数（每个pillar贡献1）
+            # 获取当前样本的 pillar 特征 (src) 和它们的目标索引 (index)
+            src = physical_pillar_features[sample_mask]  # Shape: (num_pillars_in_sample, 8)
+            index = bev_indices[sample_mask]  # Shape: (num_pillars_in_sample,)
+
+            # 为了使用 scatter_add_，我们需要将 1D 的 index 扩展以匹配 src 的形状
+            # 我们要在 H_down * W_down 这个维度上进行散射
+            # 所以 index 需要被扩展成 (num_pillars_in_sample, 8)
+            index_expanded = index.view(-1, 1).expand_as(src)
+
+            # 在当前样本的BEV图层上进行操作
+            # 先将 BEV 图 flatten 成 (8, H*W)
+            # 然后将 src (num_pillars, 8) 转置成 (8, num_pillars)
+            # 将 index (num_pillars, 8) 转置成 (8, num_pillars)
+            # 这样就可以在 dim=1 (空间维度)上进行散射了
+            sum_bev_map[i].view(8, -1).scatter_add_(dim=1, index=index_expanded.t(), src=src.t())
+
+            # 同样的方法累加计数
             ones_to_add = torch.ones_like(src)
-            count_bev_map_flat[agent_idx].scatter_add_(dim=1, index=index.T, src=ones_to_add.T)
+            count_bev_map[i].view(8, -1).scatter_add_(dim=1, index=index_expanded.t(), src=ones_to_add.t())
 
-        # 计算平均值
-        # 加上 epsilon 防止除以零
+        # 计算平均值, 加上 epsilon 防止除以零
         physical_bev_map = sum_bev_map / (count_bev_map + epsilon)
 
         return physical_bev_map
