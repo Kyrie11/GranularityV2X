@@ -29,26 +29,28 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             params['postprocess'],
             train)  # 3D Anchor Generator for Voxel
 
+    # In IntermediateFusionDataset class
+
     def __getitem__(self, idx):
-        # 1. Get LSH parameters from the config file
+        # 1. Get LSH parameters
         m = self.params['train_params']['lsh']['m']
         n = self.params['train_params']['lsh']['n']
         p = self.params['train_params']['lsh']['p']
 
-        # 2. Generate the "Ground Truth" frame for t=0
+        # 2. Generate the "Ground Truth" frame for t=0 (no delay)
         gt_base_data_dict, _, current_timestamp = self.retrieve_base_data(idx, cur_ego_pose_flag=True)
+
         # 3. Generate the realistic, delayed historical frames
-        # This call now uses cur_ego_pose_flag=False to apply real-world delays.
         historical_base_data_list, agent_delays, ego_historical_indices = \
             self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=False)
-        # 4. Combine them: GT frame is at index 0, history starts at index 1.
+
+        # 4. Combine them: GT frame at index 0, history starts at index 1
         base_data_list = [gt_base_data_dict] + historical_base_data_list
 
         processed_data_list = []
         ego_id = -1
 
-        # 5. Establish 'Ground Truth' ego pose and communication range from the GT frame
-        # This must be done only once, based on the true state at t=0.
+        # 5. Establish 'Ground Truth' ego pose and communication range
         ego_lidar_pose = []
         cav_id_list = []
 
@@ -57,23 +59,17 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 ego_id = cav_id
                 ego_lidar_pose = cav_content['params']['lidar_pose']
                 break
-
-        assert ego_id != -1, "Ego vehicle not found in the GT snapshot"
+        assert ego_id != -1, "Ego vehicle not found"
 
         for cav_id, selected_cav_base in gt_base_data_dict.items():
-            cav_lidar_pose = selected_cav_base['params']['lidar_pose']
-            distance = math.sqrt(
-                (cav_lidar_pose[0] - ego_lidar_pose[0]) ** 2 + (cav_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
+            distance = math.sqrt((selected_cav_base['params']['lidar_pose'][0] - ego_lidar_pose[0]) ** 2 +
+                                 (selected_cav_base['params']['lidar_pose'][1] - ego_lidar_pose[1]) ** 2)
             if distance <= v2xvit.data_utils.datasets.COM_RANGE:
                 cav_id_list.append(cav_id)
 
-
-        # 4. Now, process EACH historical snapshot from the list
+        # 6. Process EACH frame in the combined list (GT + History)
         for i, base_data_dict in enumerate(base_data_list):
-            processed_data_dict = OrderedDict()
-            processed_data_dict['ego'] = {}
-
-            # Pairwise transformation is calculated for each snapshot
+            processed_data_dict = OrderedDict({'ego': {}})
             pairwise_t_matrix = self.get_pairwise_transformation(base_data_dict, self.max_cav)
 
             processed_features, object_stack, object_id_stack = [], [], []
@@ -82,43 +78,44 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             ## NEW ##: Initialize a list to store absolute timestamps for this frame
             agent_timestamps = []
 
-            # Use the single cav_id_list determined from the GT frame
             for cav_id in cav_id_list:
                 if cav_id not in base_data_dict:
                     continue
+
                 selected_cav_base = base_data_dict[cav_id]
-                selected_cav_processed, void_lidar = self.get_item_single_car(
-                    selected_cav_base, ego_lidar_pose)
+                selected_cav_processed, void_lidar = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
 
                 if void_lidar:
                     continue
 
+                # Append standard data
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']
                 processed_features.append(selected_cav_processed['processed_features'])
                 velocity.append(selected_cav_processed['velocity'])
                 spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
                 infra.append(1 if int(cav_id) < 0 else 0)
-                # ** CRITICAL CHANGE: Set delay based on frame type **
+
+                # Calculate and append delay and the absolute timestamp
                 if i == 0:  # This is the Ground Truth frame
                     time_delay.append(0.0)
+                    ## NEW ##: All agents have the same current timestamp in the GT frame
                     agent_timestamps.append(current_timestamp)
                 else:  # This is a historical frame
-                    time_delay.append(float(agent_delays[cav_id]))
+                    frame_delay = float(agent_delays[cav_id])
+                    time_delay.append(frame_delay)
+                    ## NEW ##: Calculate the agent's absolute timestamp
+                    # ego_historical_indices[i-1] is the ego-vehicle's timestamp for this frame
                     ego_timestamp_for_this_frame = ego_historical_indices[i - 1].item()
                     agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
                     agent_timestamps.append(agent_absolute_timestamp)
 
-            # If no agents are left in this snapshot, skip it
             if not processed_features:
                 continue
 
-            # The rest of the logic for processing a single snapshot is the same as your original code
-            # ... (unique_indices, object_bbx_center, mask, merge_features, label_dict, padding, etc.)
-
+            # ... (Post-processing like unique_indices, stacking, masking, etc. is unchanged) ...
             unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
-            object_stack = np.vstack(object_stack)
-            object_stack = object_stack[unique_indices]
+            object_stack = np.vstack(object_stack)[unique_indices]
 
             object_bbx_center = np.zeros((self.params['postprocess']['max_num'], 7))
             mask = np.zeros(self.params['postprocess']['max_num'])
@@ -133,8 +130,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
             # Padding for all lists to max_cav length
             velocity += (self.max_cav - len(velocity)) * [0.]
-            time_delay += (self.max_cav - len(time_delay)) * [0.]  # Also pad delay
+            time_delay += (self.max_cav - len(time_delay)) * [0.]
             infra += (self.max_cav - len(infra)) * [0.]
+            ## NEW ##: Pad the new timestamp list as well
             agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0]  # Use 0 as padding value
 
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
@@ -151,15 +149,15 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 'label_dict': label_dict,
                 'cav_num': cav_num,
                 'velocity': velocity,
-                'time_delay': time_delay,  # This is now correctly included
+                'time_delay': time_delay,
                 'infra': infra,
                 'spatial_correction_matrix': spatial_correction_matrix,
                 'pairwise_t_matrix': pairwise_t_matrix,
+                ## NEW ##: Add the list of agent timestamps to the output dictionary
                 'agent_timestamps': agent_timestamps
             })
             processed_data_list.append(processed_data_dict)
 
-        # Add the ego's historical timeline to the output
         return processed_data_list, ego_historical_indices
 
     @staticmethod
