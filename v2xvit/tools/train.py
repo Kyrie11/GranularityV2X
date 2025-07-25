@@ -172,7 +172,7 @@ def main():
             current_data = batch_data_list[0]
             data_dict = current_data['ego']
             delay_tensor = data_dict['time_delay']
-            print(f"len(delay_tensor)={len(delay_tensor)}")
+            print(f"len(delay_tensor[0])={len(delay_tensor)}")
             print("delay_tensor:",delay_tensor)
             # the model will be evaluation mode during validation
             model.train()
