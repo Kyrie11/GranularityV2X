@@ -35,6 +35,10 @@ def main():
 
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
+    n = hypes['train_params']['lsh']['n']
+    m = hypes['train_params']['lsh']['m']
+    p = hypes['train_params']['lsh']['p']
+
     multi_gpu_utils.init_distributed_mode(opt)
 
     print('-----------------Dataset Building------------------')
@@ -42,11 +46,6 @@ def main():
     opencood_validate_dataset = build_dataset(hypes,
                                               visualize=False,
                                               train=False)
-
-    temporal_config = hypes['train_params']['temporal_config']
-    n = temporal_config['long_term_stride']  # 长期历史帧间隔
-    m = temporal_config['long_term_memory']  # 长期历史帧数
-    p = temporal_config['short_term_memory']  # 短期历史帧数
 
     if opt.distributed:
         sampler_train = DistributedSampler(opencood_train_dataset)
@@ -143,32 +142,37 @@ def main():
 
         pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
         record_len_list = []
-        for i, batch_data_list in enumerate(train_loader):
+        for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-            collated_data_list, unique_indices, short_indices, long_indices = batch_data_list
-            # 1. Create a mapping from an index to its corresponding data
-            # This is the crucial step to link indices back to their data
-            data_map = {index: data for index, data in zip(unique_indices, collated_data_list)}
-            print("short_indices:", short_indices)
-            print("long_indices:", long_indices)
-            print("unique_indices outside:", unique_indices)
-            # 2. Reconstruct the final history lists using the correct indices
-            short_term_history_data = [data_map[idx] for idx in short_indices]
-            long_term_history_data = [data_map[idx] for idx in long_indices]
 
-            batch_data = short_term_history_data[0]
-            batch_data = train_utils.to_device(batch_data, device)
-            short_term_history_data = train_utils.to_device(short_term_history_data, device)
-            long_term_history_data = train_utils.to_device(long_term_history_data, device)
-            # 3. VERIFY THE LOGIC
-            if i < 2:  # Check the first couple of iterations
-                print(f"--- Iteration {i} ---")
-                print(f"Short-term indices required: {short_indices}")
-                print(f"Long-term indices required:  {long_indices}")
-                print(f" short-term history length: {len(short_term_history_data)}")
-                print(f" long-term history length:  {len(long_term_history_data)}")
-                print("-" * 20)
+            print(f"一共取出了{len(batch_data_list)}帧")
+            short_his_data = batch_data_list[:n]
+
+            # Long-term history needs to be selected carefully
+            long_his_data = []
+
+            # Let's assume a batch size of 1 for simplicity in this example.
+            # For batch_size > 1, you would need a loop.
+            # ego_indices_batch is a list of tensors, one per batch item.
+            current_ego_indices = ego_indices_batch[0]  # Shape: [num_history_frames]
+            print("current_ego_indices：", current_ego_indices)
+            # 1. Determine the target long-term timestamps for this specific sample
+            start_index = current_ego_indices[0].item()  # The most recent timestamp
+            target_long_indices = [start_index - j * p for j in range(m)]
+
+            # 2. Find where these target timestamps are located in our batch data
+            for target_idx in target_long_indices:
+                # Find the position of target_idx in the list of available frames
+                match_pos = (current_ego_indices == target_idx).nonzero(as_tuple=True)[0]
+                if match_pos.nelement() > 0:
+                    # We found it, now grab the corresponding data snapshot
+                    frame_index = match_pos.item()
+                    long_his_data.append(batch_data_list[frame_index])
+            current_data = batch_data_list[0]
+            data_dict = current_data['ego']
+            delay_tensor = data_dict['delay']
+            print("delay_tensor:",delay_tensor)
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()

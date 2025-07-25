@@ -89,11 +89,8 @@ class How2comm(nn.Module):
         g3_data: detection-level data
     '''
     def forward(self, g1_data, g2_data, g3_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None):
-        curr_g1_data = g1_data
-        curr_g2_data = g2_data
-        curr_g3_data = g3_data
         device = g2_data.device
-        _, C, H, W = curr_g2_data.shape
+        _, C, H, W = g2_data.shape
         B, L = pairwise_t_matrix.shape[:2]
 
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
@@ -105,6 +102,29 @@ class How2comm(nn.Module):
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
+        g1_short_his, g2_short_his, g3_short_his = short_his
+        g1_long_his, g2_long_his, g3_long_his = long_his
+
+        #if short_his and long_his:
+
+        if self.multi_scale:
+            ups = []
+            with_resnet = True if hasattr(backbone, 'resnet') else False
+            if with_resnet:
+                g2_feats = backbone.resnet(g2_data)
+                g2_short_feats = backbone.resnet(g2_short_his)
+                g2_long_feats = backbone.resnet(g2_long_his)
+
+            for i in range(self.num_levels):
+                g2_data = g2_feats[i] if with_resnet else backbone.blocks[i](g2_data)
+                g2_short_his = g2_short_feats[i] if with_resnet else backbone.blocks[i](g2_short_his)
+                g2_long_his = g2_long_feats[i] if with_resnet else backbone.blocks[i](g2_long_his)
+
+                if i == 0:
+                    if self.communication:
+                        batch_g1_list = self.regroup(g1_data)
+                        batch_g2_list = self.regroup(g2_data)
+                        batch_g3_list = self.regroup(g3_data)
 
 
         for b in range(B):

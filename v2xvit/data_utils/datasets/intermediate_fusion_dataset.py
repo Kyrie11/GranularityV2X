@@ -29,185 +29,124 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             params['postprocess'],
             train)  # 3D Anchor Generator for Voxel
 
-        if 'temporal_config' in params['train_params']:
-            self.temporal_config = params['train_params']['temporal_config']
-        else:
-            #如果没有配置，则默认为只加载当前帧
-            self.temporal_config = {'long_term_stride': 1, 'long_term_memory': 1, 'short_term_memory': 1}
+    def __getitem__(self, idx):
+        # 1. Get LSH parameters from the config file
+        m = self.params['train_params']['lsh']['m']
+        n = self.params['train_params']['lsh']['n']
+        p = self.params['train_params']['lsh']['p']
 
-    '''
-        把原来的顺序取多帧改为取长短期历史帧
-    '''
-    def __getitem__(self, idx): 
-        # when the cur_ego_pose_flag is set to True, there is no time gap
-        # between  the time when the LiDAR data is captured by connected
-        # agents and when the extracted features are received by
-        # the ego vehicle. This is equal to implement STCM.
-        n = self.temporal_config['long_term_stride'] #长期历史帧间隔
-        m = self.temporal_config['long_term_memory'] #长期历史帧数
-        p = self.temporal_config['short_term_memory'] #短期历史帧数
+        # 2. New retrieval call. Also gets agent_delays and the ego's timeline.
+        base_data_list, agent_delays, ego_target_indices = \
+            self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=self.cur_ego_pose_flag)
 
-        #调用加载长短期历史的函数
-        select_dict, frame_unique_indices, short_indices, long_indices = self.retrieve_long_short_his(
-                                                      idx,
-                                                      n=n,
-                                                      m=m,
-                                                      p=p,
-                                                      cur_ego_pose_flag=self.cur_ego_pose_flag)
-
-
-        if not select_dict:
-            return None
-
-        try:
-            assert idx == list(select_dict.keys())[
-                0], "The first element in the multi frame must be current index"
-        except AssertionError as aeeor:
-            print("assert error dataset", list(select_dict.keys()), idx)
         processed_data_list = []
         ego_id = -1
         ego_lidar_pose = []
-        ego_id_list = []
+
+        # 3. Use the CURRENT snapshot (the first in the list) to determine ego info and communication range
+        current_data_dict = base_data_list[0]
         cav_id_list = []
-        for index, base_data_dict in select_dict.items():
+
+        for cav_id, cav_content in current_data_dict.items():
+            if cav_content['ego']:
+                ego_id = cav_id
+                # The 'lidar_pose' in params is the delayed pose. We need the current one for range check.
+                # We can get it from the 'gt_transformation_matrix' which transforms from current agent pose to current ego pose.
+                # A simpler way is to just calculate distance based on the poses used for transformation.
+                ego_lidar_pose = cav_content['params']['lidar_pose']  # This is fine as ego delay is 0.
+                break
+
+        assert ego_id != -1
+        assert len(ego_lidar_pose) > 0
+
+        # Determine which CAVs are in range at the current moment
+        for cav_id, selected_cav_base in current_data_dict.items():
+            # As before, pose is from agent's (potentially delayed) frame. This is what matters.
+            cav_lidar_pose = selected_cav_base['params']['lidar_pose']
+            distance = math.sqrt((cav_lidar_pose[0] - ego_lidar_pose[0]) ** 2 +
+                                 (cav_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
+            if distance <= v2xvit.data_utils.datasets.COM_RANGE:
+                cav_id_list.append(cav_id)
+
+        # 4. Now, process EACH historical snapshot from the list
+        for base_data_dict in base_data_list:
             processed_data_dict = OrderedDict()
             processed_data_dict['ego'] = {}
 
-            if index == idx:
-                # first find the ego vehicle's lidar pose
-                for cav_id, cav_content in base_data_dict.items():
-                    if cav_content['ego']:
-                        ego_id = cav_id
-                        ego_lidar_pose = cav_content['params']['lidar_pose']
-                        break
-                assert cav_id == list(base_data_dict.keys())[
-                    0], "The first element in the OrderedDict must be ego"
-            assert ego_id != -1
-            assert len(ego_lidar_pose) > 0
-            ego_id_list.append(ego_id)
-            # this is used for v2vnet and disconet
-            pairwise_t_matrix = \
-                self.get_pairwise_transformation(base_data_dict,
-                                                 self.params['train_params'][
-                                                     'max_cav'])
+            # Pairwise transformation is calculated for each snapshot
+            pairwise_t_matrix = self.get_pairwise_transformation(base_data_dict, self.max_cav)
 
-            processed_features = []
-            object_stack = []
-            object_id_stack = []
+            processed_features, object_stack, object_id_stack = [], [], []
+            velocity, infra, spatial_correction_matrix = [], [], []
 
-            # prior knowledge for time delay correction and indicating data type
-            # (V2V vs V2i)
-            velocity = []
-            time_delay = []
-            infra = []
-            spatial_correction_matrix = []
+            # We also need to store the delays for agents in this snapshot
+            delay_in_frames = []
 
-            if self.visualize:
-                projected_lidar_stack = []
-
-            # loop over all CAVs to process information
-            for cav_id, selected_cav_base in base_data_dict.items():
-                # check if the cav is within the communication range with ego
-                distance = \
-                    math.sqrt((selected_cav_base['params']['lidar_pose'][0] -
-                               ego_lidar_pose[0]) ** 2 + (
-                                      selected_cav_base['params'][
-                                          'lidar_pose'][1] - ego_lidar_pose[
-                                          1]) ** 2)
-                # if distance > v2xvit.data_utils.datasets.COM_RANGE and index == idx:
-                # if distance > v2xvit.data_utils.datasets.COM_RANGE:
-                #     continue
-                if index == idx:
-                    if distance > v2xvit.data_utils.datasets.COM_RANGE:
-                        continue
-                    cav_id_list.append(cav_id)
-                else:
-                    if cav_id not in cav_id_list:
-                        continue
-
+            # Loop over only the CAVs that were determined to be in range
+            for cav_id in cav_id_list:
+                selected_cav_base = base_data_dict[cav_id]
                 selected_cav_processed, void_lidar = self.get_item_single_car(
-                    selected_cav_base,
-                    ego_lidar_pose)
+                    selected_cav_base, ego_lidar_pose)
 
                 if void_lidar:
                     continue
 
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']
-                processed_features.append(
-                    selected_cav_processed['processed_features'])
-
+                processed_features.append(selected_cav_processed['processed_features'])
                 velocity.append(selected_cav_processed['velocity'])
-                time_delay.append(float(selected_cav_base['time_delay']))
-                spatial_correction_matrix.append(
-                    selected_cav_base['params']['spatial_correction_matrix'])
+                spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
                 infra.append(1 if int(cav_id) < 0 else 0)
 
-                if self.visualize:
-                    projected_lidar_stack.append(
-                        selected_cav_processed['projected_lidar'])
+                # Append the pre-calculated delay for this agent
+                delay_in_frames.append(agent_delays[cav_id])
 
-            # exclude all repetitive objects
-            unique_indices = \
-                [object_id_stack.index(x) for x in set(object_id_stack)]
+            # If no agents are left in this snapshot, skip it
+            if not processed_features:
+                continue
+
+            # The rest of the logic for processing a single snapshot is the same as your original code
+            # ... (unique_indices, object_bbx_center, mask, merge_features, label_dict, padding, etc.)
+
+            unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
             object_stack = np.vstack(object_stack)
             object_stack = object_stack[unique_indices]
 
-            # make sure bounding boxes across all frames have the same number
-            object_bbx_center = \
-                np.zeros((self.params['postprocess']['max_num'], 7))
+            object_bbx_center = np.zeros((self.params['postprocess']['max_num'], 7))
             mask = np.zeros(self.params['postprocess']['max_num'])
             object_bbx_center[:object_stack.shape[0], :] = object_stack
             mask[:object_stack.shape[0]] = 1
 
-            # merge preprocessed features from different cavs into the same dict
             cav_num = len(processed_features)
             merged_feature_dict = self.merge_features_to_dict(processed_features)
-
-            # generate the anchor boxes
             anchor_box = self.post_processor.generate_anchor_box()
+            label_dict = self.post_processor.generate_label(
+                gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
 
-            # generate targets label
-            label_dict = \
-                self.post_processor.generate_label(
-                    gt_box_center=object_bbx_center,
-                    anchors=anchor_box,
-                    mask=mask)
-
-            # pad dv, dt, infra to max_cav
+            # Padding for velocity, infra, etc.
             velocity = velocity + (self.max_cav - len(velocity)) * [0.]
-            time_delay = time_delay + (self.max_cav - len(time_delay)) * [0.]
             infra = infra + (self.max_cav - len(infra)) * [0.]
+            delay_in_frames = delay_in_frames + (self.max_cav - len(delay_in_frames)) * [0]  # Also pad delay
+
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
-            padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(
-                spatial_correction_matrix), 1, 1))
+            padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
             spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
 
-            processed_data_dict['ego'].update(
-                {'object_bbx_center': object_bbx_center,
-                 'object_bbx_mask': mask,
-                 'object_ids': [object_id_stack[i] for i in unique_indices],
-                 'anchor_box': anchor_box,
-                 'processed_lidar': merged_feature_dict,
-                 'label_dict': label_dict,
-                 'cav_num': cav_num,
-                 'velocity': velocity,
-                 'time_delay': time_delay,
-                 'infra': infra,
-                 'spatial_correction_matrix': spatial_correction_matrix,
-                 'pairwise_t_matrix': pairwise_t_matrix})
+            processed_data_dict['ego'].update({
+                'object_bbx_center': object_bbx_center, 'object_bbx_mask': mask,
+                'processed_lidar': merged_feature_dict, 'label_dict': label_dict,
+                'cav_num': cav_num, 'spatial_correction_matrix': spatial_correction_matrix,
+                'pairwise_t_matrix': pairwise_t_matrix,
+                'anchor_box': anchor_box,
+                'velocity': velocity, 'infra': infra,
+                'delay': delay_in_frames,  # Add the padded delay list here
+                'object_ids': [object_id_stack[i] for i in unique_indices]
+            })
 
-            if self.visualize:
-                processed_data_dict['ego'].update({'origin_lidar':
-                    np.vstack(
-                        projected_lidar_stack)})
             processed_data_list.append(processed_data_dict)
-        try:
-            assert len(set(ego_id_list)) == 1, "The ego id must be same"
-        except AssertionError as aeeor:
-            print("assert error ego id", ego_id_list)
 
-        return processed_data_list, frame_unique_indices, short_indices, long_indices
+        # Add the ego's historical timeline to the output
+        return processed_data_list, ego_target_indices
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):
@@ -327,26 +266,14 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         return merged_feature_dict
 
     def collate_batch_train(self, batch):
-        batch = [item for item in batch if item is not None]
-        if not batch: return None
-        assert len(batch) == 1, "Batch size must be 1 for history mode."
-
-        processed_data_list, unique_indices, short_indices, long_indices = batch[0]
-        output_dict_list = self.collate_single_item_history([processed_data_list])
-
-        return output_dict_list, unique_indices, short_indices, long_indices
-
-    def collate_single_item_history(self, batch):
-        #过滤掉getitem返回的None值
-        batch = [item for item in batch if item is not None]
-        #如果整个batch都被过滤掉了， 返回一个空列表或其他标记
-        if not batch:
-            return None
         # Intermediate fusion is different the other two
         output_dict_list = []
-        for j in range(len(batch[0])):  
-            output_dict = {'ego': {}}
+        # The batch is a list of tuples: [(processed_data_list_0, ego_indices_0), (processed_data_list_1, ego_indices_1), ...]
+        num_history_frames = len(batch[0][0])  # Number of historical snapshots for each item
 
+        for j in range(num_history_frames):
+            output_dict = {'ego': {}}
+            delay_list = []  # To collect delays for this snapshot
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
@@ -378,6 +305,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
                 processed_lidar_list.append(ego_dict['processed_lidar'])
                 record_len.append(ego_dict['cav_num'])
+                # The 'delay' is a list of delays for agents in this sample. We extend our batch-wide list.
+                delay_list.extend(ego_dict['delay'][:ego_dict['cav_num']])  # Use cav_num to get unpadded delays
                 label_dict_list.append(ego_dict['label_dict'])
 
                 velocity.append(ego_dict['velocity'])
@@ -400,6 +329,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 self.pre_processor.collate_batch(merged_feature_dict)
             # [2, 3, 4, ..., M]
             record_len = torch.from_numpy(np.array(record_len, dtype=int))
+            delay = torch.from_numpy(np.array(delay_list)).int()
             label_torch_dict = \
                 self.post_processor.collate_batch(label_dict_list)
 
@@ -424,6 +354,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                                     'label_dict': label_torch_dict,
                                     'object_ids': object_ids[0],
                                     'prior_encoding': prior_encoding,
+                                    'delay': delay,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
                                     'pairwise_t_matrix': pairwise_t_matrix})
 
@@ -433,8 +364,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 origin_lidar = torch.from_numpy(origin_lidar)
                 output_dict['ego'].update({'origin_lidar': origin_lidar})
             output_dict_list.append(output_dict)
-
-        return output_dict_list
+        ego_indices_batch = [torch.from_numpy(np.array(batch[i][1])) for i in range(len(batch))]
+        return output_dict_list, ego_indices_batch
     
     def collate_batch_test(self, batch):
             # output_dict_list = []

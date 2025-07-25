@@ -727,3 +727,140 @@ class BaseDataset(Dataset):
                                       show_vis,
                                       save_path,
                                       dataset=dataset)
+
+
+    def retrieve_lsh_data(self, idx, m, n, p, cur_ego_pose_flag=True):
+        """
+            Retrieves Long-Short History (LSH) data for all agents.
+
+            For each required historical frame of the ego-vehicle, this function
+            assembles a corresponding "snapshot" of data from all other agents,
+            respecting their individual, calculated delays.
+
+            Parameters
+            ----------
+            idx : int
+                The dataset index, corresponding to the ego-vehicle's current timestamp.
+            m : int, n : int, p : int
+                Parameters for Long-Short History.
+            cur_ego_pose_flag : bool
+                Flag to use the current ego pose for all transformations.
+
+            Returns
+            -------
+            output_data_dicts : list
+                A list of OrderedDicts. Each OrderedDict is a "snapshot" containing
+                the base data for all agents at a specific historical time.
+
+            timestamp_index: int
+                The timestamp index of the current frame for the ego vehicle.
+        """
+        # 1. Find scenario and ego's current timestamp index (relative to scenario)
+        scenario_index = 0
+        for i, ele in enumerate(self.len_record):
+            if idx < ele:
+                scenario_index = i
+                break
+
+        timestamp_index = idx if scenario_index == 0 else \
+            idx - self.len_record[scenario_index - 1]
+
+        scenario_database = self.scenario_database[scenario_index]
+        max_len = len(list(list(scenario_database.values())[0].items())) - 2  # -2 to be safe
+
+        # 2. Get the full data for the CURRENT timestamp to calculate delays for all agents
+        current_data_dict, _, current_timestamp_key = self.retrieve_base_data(idx, cur_ego_pose_flag)
+
+        # Store the calculated delay (in frames) for each agent
+        agent_delays = {cav_id: content['time_delay'] for cav_id, content in current_data_dict.items()}
+
+        # 3. Generate the target historical indices FOR THE EGO VEHICLE
+        ego_target_indices = self._generate_lsh_indices(timestamp_index, m, n, p, max_len)
+
+        # Find ego content, which is needed for transformations
+        ego_content = None
+        for cav_content in scenario_database.values():
+            if cav_content['ego']:
+                ego_content = cav_content
+                break
+
+            # 4. Loop through each of the ego's target frames and build a snapshot
+            output_data_dicts = []
+            for target_ego_idx in ego_target_indices:
+                snapshot_data = OrderedDict()
+                # The offset of this historical frame from the present
+                offset = timestamp_index - target_ego_idx
+
+                # Loop through every agent in the scenario to get its corresponding data
+                for cav_id, cav_content in scenario_database.items():
+                    delay = agent_delays[cav_id]
+
+                    # Calculate the agent's target index for this snapshot
+                    # Start from its delayed time, and apply the same offset
+                    agent_delayed_start_idx = timestamp_index - delay
+                    target_agent_idx = agent_delayed_start_idx - offset
+
+                    # Boundary check: clamp to the first frame if index is too small
+                    target_agent_idx = max(0, target_agent_idx)
+
+                    # Get the actual data for the agent at its calculated historical index
+                    timestamp_key_delay = self.return_timestamp_key(scenario_database, target_agent_idx)
+
+                    reformed_params = self.reform_param(cav_content,
+                                                        ego_content,
+                                                        current_timestamp_key,  # Ego pose is ALWAYS current
+                                                        timestamp_key_delay,  # Agent data is from its past
+                                                        cur_ego_pose_flag)
+
+                    lidar_np = pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
+
+                    # Assemble the single agent's data for this snapshot
+                    snapshot_data[cav_id] = OrderedDict()
+                    snapshot_data[cav_id]['ego'] = cav_content['ego']
+                    snapshot_data[cav_id]['params'] = reformed_params
+                    snapshot_data[cav_id]['lidar_np'] = lidar_np
+                    # We don't need to add time_delay here as it's already been applied
+
+                output_data_dicts.append(snapshot_data)
+
+            return output_data_dicts, agent_delays, ego_target_indices
+
+
+    @staticmethod
+    def __generate_lsh_inference(start_index, m, n, p, max_len):
+        """
+            Generates a unique, sorted list of indices for long and short term history.
+
+            Parameters
+            ----------
+            start_index : int
+                The starting timestamp index (e.g., current time or delayed time).
+            m : int
+                Number of long-term history frames.
+            n : int
+                Number of short-term history frames.
+            p : int
+                Period/interval for long-term frames.
+            max_len : int
+                The maximum possible length of the scenario to prevent out-of-bounds.
+                (Although we clamp at 0, this could be used for further checks).
+
+            Returns
+            -------
+            list
+                A list of unique, valid timestamp indices, sorted in descending order.
+        """
+        # Generate short-term indices: [t, t-1, t-2, ..., t-(n-1)]
+        short_indices = [start_index - i for i in range(n)]
+
+        # Generate long-term indices: [t, t-p, t-2p, ..., t-(m-1)p]
+        long_indices = [start_index - i * p for i in range(m)]
+
+        # Combine, get unique indices, and filter out any negative indices
+        combined_indices = list(set(short_indices + long_indices))
+        valid_indices = [i for i in combined_indices if i >= 0]
+
+        # Sort in descending order to have the latest timestamp first
+        valid_indices.sort(reverse=True)
+
+        return valid_indices
