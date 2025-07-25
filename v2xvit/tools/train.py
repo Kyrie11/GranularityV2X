@@ -178,7 +178,7 @@ def main():
                         long_his_data.append(historical_data[frame_index])
 
             current_data = batch_data_list[0]
-            print(f"voxel_features:{current_data['ego'][['processed_lidar']['voxel_features']]}")
+            print(f"voxel_features:{current_data['ego']['processed_lidar']['voxel_features']}")
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()
