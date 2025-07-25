@@ -100,7 +100,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 if i == 0:  # This is the Ground Truth frame
                     time_delay.append(0.0)
                     ## NEW ##: All agents have the same current timestamp in the GT frame
-                    agent_timestamps.append(current_timestamp)
+                    agent_timestamps.append(float(current_timestamp))
                 else:  # This is a historical frame
                     frame_delay = float(agent_delays[cav_id])
                     time_delay.append(frame_delay)
@@ -108,7 +108,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     # ego_historical_indices[i-1] is the ego-vehicle's timestamp for this frame
                     ego_timestamp_for_this_frame = ego_historical_indices[i - 1]
                     agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
-                    agent_timestamps.append(agent_absolute_timestamp)
+                    agent_timestamps.append(float(agent_absolute_timestamp))
 
             if not processed_features:
                 continue
@@ -133,7 +133,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             time_delay += (self.max_cav - len(time_delay)) * [0.]
             infra += (self.max_cav - len(infra)) * [0.]
             ## NEW ##: Pad the new timestamp list as well
-            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0]  # Use 0 as padding value
+            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0. ]  # Use 0 as padding value
 
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
             padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
