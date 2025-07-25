@@ -138,13 +138,7 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
-            print("spatial_features_2d.shape=", spatial_features_2d.shape)
-            g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
-            print("vox_bev.shape=", g1.shape)
-            psm = self.cls_head(spatial_features_2d)
-            rm = self.reg_head(spatial_features_2d)
-            g3 = self.get_g3_bev(psm, rm)
-            print("det_bev.shape=", g3.shape)
+
             batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
             feature_list.append(spatial_features)
@@ -154,6 +148,15 @@ class PointPillarHow2comm(nn.Module):
                 spatial_features_2d, record_len))
             regroup_feature_list_large.append(
                 self.regroup(spatial_features, record_len))
+
+            print("spatial_features.shape=", spatial_features.shape)
+            print("spatial_features_2d.shape=", spatial_features_2d.shape)
+            g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
+            print("vox_bev.shape=", g1.shape)
+            psm = self.cls_head(spatial_features)
+            rm = self.reg_head(spatial_features)
+            g3 = self.get_g3_bev(psm, rm)
+            print("det_bev.shape=", g3.shape)
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
@@ -210,7 +213,7 @@ class PointPillarHow2comm(nn.Module):
         points_mean = points_sum / safe_voxel_num_points
         points_sq_sum = torch.sum(masked_voxel_features[:, :, :3] ** 2, dim=1)
         points_mean_sq = points_sq_sum / safe_voxel_num_points
-        variance = points_mean_sq - points_mean ** 2
+        variance = torch.clamp(points_mean_sq - points_mean ** 2) #确保方差非负
         # 通道 5, 6, 7: x, y, z 方差 (x, y, z variance)
         xyz_variance = variance.split(1, dim=-1)
         x_variance, y_variance, z_variance = xyz_variance[0], xyz_variance[1], xyz_variance[2]
@@ -223,12 +226,12 @@ class PointPillarHow2comm(nn.Module):
 
         # 5. 将物理特征散射到BEV图上 (借鉴PointPillarScatter的逻辑)
         # batch_size, H, W 可以从self.scatter获取
-        batch_size = coords[:, 0].max().int().item() + 1
+        N = coords[:, 0].max().int().item() + 1
         H, W = self.scatter.ny, self.scatter.nx
 
         # 创建空的BEV画布
         physical_bev_map = torch.zeros(
-            batch_size, 8, H, W,  # 8个通道
+            N, 8, H, W,  # 8个通道
             dtype=physical_pillar_features.dtype,
             device=physical_pillar_features.device)
 
@@ -240,10 +243,12 @@ class PointPillarHow2comm(nn.Module):
         # 使用scatter_函数进行高效赋值
         # 我们需要将 (batch_idx, pillar_idx) 映射到 (batch_idx, channel_idx, bev_idx)
         # 首先处理每个batch
-        for b_idx in range(batch_size):
-            batch_mask = (coords[:, 0] == b_idx)
+        for agent_idx in range(N):
+            agent_mask = (coords[:, 0] == agent_idx)
+            if not agent_mask.any():
+                continue
             # 将当前batch的pillar特征 (num_pillars_in_batch, 8) 放到对应的BEV位置
-            physical_bev_map[b_idx].view(8, H * W).T[bev_indices[batch_mask]] = physical_pillar_features[batch_mask]
+            physical_bev_map[agent_idx].view(8, H * W).T[bev_indices[agent_mask]] = physical_pillar_features[agent_mask]
 
         return physical_bev_map
 
