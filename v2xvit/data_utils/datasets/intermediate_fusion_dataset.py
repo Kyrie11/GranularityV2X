@@ -106,7 +106,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     time_delay.append(frame_delay)
                     ## NEW ##: Calculate the agent's absolute timestamp
                     # ego_historical_indices[i-1] is the ego-vehicle's timestamp for this frame
-                    ego_timestamp_for_this_frame = ego_historical_indices[i - 1].item()
+                    ego_timestamp_for_this_frame = ego_historical_indices[i - 1]
                     agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
                     agent_timestamps.append(agent_absolute_timestamp)
 
