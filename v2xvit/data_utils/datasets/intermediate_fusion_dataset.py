@@ -355,7 +355,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 torch.stack([velocity, time_delay, infra], dim=-1).float()
             # (B, max_cav)
             pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
-            agent_timestamps = torch.from_numpy(np.arrary(agent_timestamps))
+            agent_timestamps = torch.from_numpy(np.array(agent_timestamps))
             # object id is only used during inference, where batch size is 1.
             # so here we only get the first element.
             output_dict['ego'].update({'object_bbx_center': object_bbx_center,
