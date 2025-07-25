@@ -146,6 +146,7 @@ def main():
             if batch_data_list is None:
                 continue
 
+            print(f"一共有{len(batch_data_list)}帧")
             historical_data = batch_data_list[1:]
             short_his_data = historical_data[:n]
             long_his_data = []
