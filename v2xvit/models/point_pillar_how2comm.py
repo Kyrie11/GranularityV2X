@@ -99,6 +99,8 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, current_data, short_term, long_term):
+        record = current_data['ego']['record_len']
+        print(f"record: {record}")
         current_data_dict = current_data['ego']
         delay = short_term[0]['ego']['time_delay']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
