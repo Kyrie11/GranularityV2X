@@ -58,6 +58,7 @@ class BaseDataset(Dataset):
             self.async_mode = \
                 'sim' if 'async_mode' not in params['wild_setting'] \
                     else params['wild_setting']['async_mode']
+            print(f"async_mode：{self.async_mode}")
             self.async_overhead = params['wild_setting']['async_overhead']
 
             # localization error
