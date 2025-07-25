@@ -269,106 +269,107 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         return merged_feature_dict
 
-    def collate_batch_train(self, batch):
-        # Intermediate fusion is different the other two
-        output_dict_list = []
-        # The batch is a list of tuples: [(processed_data_list_0, ego_indices_0), (processed_data_list_1, ego_indices_1), ...]
-        num_history_frames = len(batch[0][0])  # Number of historical snapshots for each item
+    def collate_batch_train(batch):
+        """
+        Custom collate function for training.
 
-        for j in range(num_history_frames):
-            output_dict = {'ego': {}}
-            object_bbx_center = []
-            object_bbx_mask = []
-            object_ids = []
+        Parameters
+        ----------
+        batch : list
+            List of tuples, where each tuple contains (processed_data_list, ego_historical_indices).
+
+        Returns
+        -------
+        collated_data : tuple
+            A tuple containing the collated processed_data_list and ego_historical_indices.
+        """
+        # Unzip the batch into separate lists
+        processed_data_list_batch = [item[0] for item in batch]
+        ego_indices_batch = [item[1] for item in batch]
+
+        # The number of frames (GT + history) is determined by the first sample in the batch
+        num_frames = len(processed_data_list_batch[0])
+
+        # This will be our final list of batched frame dictionaries
+        output_data_list = []
+
+        # Iterate through each frame index (e.g., frame 0 is GT, frame 1 is t-1, etc.)
+        for frame_idx in range(num_frames):
+            # Create a temporary list of data for the current frame from all samples in the batch
+            frame_batch = [sample_frames[frame_idx] for sample_frames in processed_data_list_batch]
+
+            # Initialize lists to gather data from all samples for this frame
+            object_bbx_center_list = []
+            object_bbx_mask_list = []
+            object_ids_list = []
+
             processed_lidar_list = []
-            # used to record different scenario
             record_len = []
-            label_dict_list = []
 
-            # used for PriorEncoding
-            velocity = []
-            time_delay = []
-            infra = []
-
-            # pairwise transformation matrix
+            velocity_list = []
+            time_delay_list = []
+            infra_list = []
             pairwise_t_matrix_list = []
-
-            # used for correcting the spatial transformation between delayed timestamp
-            # and current timestamp
             spatial_correction_matrix_list = []
 
-            agent_timestamps = []
-            if self.visualize:
-                origin_lidar = []
+            ## NEW ##: Initialize the list for our new timestamp data
+            agent_timestamps_list = []
 
-            for i in range(len(batch)): 
-                ego_dict = batch[i][0][j]['ego']
-                object_bbx_center.append(ego_dict['object_bbx_center'])
-                object_bbx_mask.append(ego_dict['object_bbx_mask'])
-                object_ids.append(ego_dict['object_ids'])
+            # Now, loop through the data for each sample *within this specific frame*
+            for data in frame_batch:
+                # Data that is batched at the "sample" level
+                object_bbx_center_list.append(data['ego']['object_bbx_center'])
+                object_bbx_mask_list.append(data['ego']['object_bbx_mask'])
+                object_ids_list.append(data['ego']['object_ids'])
 
-                processed_lidar_list.append(ego_dict['processed_lidar'])
-                record_len.append(ego_dict['cav_num'])
-                # The 'delay' is a list of delays for agents in this sample. We extend our batch-wide list.
-                label_dict_list.append(ego_dict['label_dict'])
+                # Data that is batched at the "agent" level
+                processed_lidar_list.append(data['ego']['processed_lidar'])
+                record_len.append(data['ego']['cav_num'])
 
-                velocity.append(ego_dict['velocity'])
-                time_delay.append(ego_dict['time_delay'])
-                infra.append(ego_dict['infra'])
-                spatial_correction_matrix_list.append(
-                    ego_dict['spatial_correction_matrix'])
-                pairwise_t_matrix_list.append(ego_dict['pairwise_t_matrix'])
-                agent_timestamps.append(ego_dict['agent_timestamps'])
-                if self.visualize:
-                    origin_lidar.append(ego_dict['origin_lidar'])
-            # convert to numpy, (B, max_num, 7)
-            object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
-            object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
+                # Extend the lists with per-agent information
+                velocity_list.extend(data['ego']['velocity'])
+                time_delay_list.extend(data['ego']['time_delay'])
+                infra_list.extend(data['ego']['infra'])
 
-            # example: {'voxel_features':[np.array([1,2,3]]),
-            # np.array([3,5,6]), ...]}
-            merged_feature_dict = self.merge_features_to_dict(processed_lidar_list)
-            processed_lidar_torch_dict = \
-                self.pre_processor.collate_batch(merged_feature_dict)
-            # [2, 3, 4, ..., M]
-            record_len = torch.from_numpy(np.array(record_len, dtype=int))
-            label_torch_dict = \
-                self.post_processor.collate_batch(label_dict_list)
+                ## NEW ##: Extend the list with the agent timestamps
+                agent_timestamps_list.extend(data['ego']['agent_timestamps'])
 
-            # (B, max_cav)
-            velocity = torch.from_numpy(np.array(velocity))
-            time_delay = torch.from_numpy(np.array(time_delay))
-            infra = torch.from_numpy(np.array(infra))
-            spatial_correction_matrix_list = \
-                torch.from_numpy(np.array(spatial_correction_matrix_list))
-            # (B, max_cav, 3)
-            prior_encoding = \
-                torch.stack([velocity, time_delay, infra], dim=-1).float()
-            # (B, max_cav)
-            pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
-            agent_timestamps = torch.from_numpy(np.array(agent_timestamps)).float()
-            # object id is only used during inference, where batch size is 1.
-            # so here we only get the first element.
-            output_dict['ego'].update({'object_bbx_center': object_bbx_center,
-                                    'object_bbx_mask': object_bbx_mask,
-                                    'processed_lidar': processed_lidar_torch_dict,
-                                    'record_len': record_len,
-                                    'label_dict': label_torch_dict,
-                                    'object_ids': object_ids[0],
-                                    'prior_encoding': prior_encoding,
-                                    'time_delay': time_delay,
-                                    'spatial_correction_matrix': spatial_correction_matrix_list,
-                                    'pairwise_t_matrix': pairwise_t_matrix,
-                                    'agent_timestamps': agent_timestamps})
+                pairwise_t_matrix_list.append(data['ego']['pairwise_t_matrix'])
+                spatial_correction_matrix_list.append(data['ego']['spatial_correction_matrix'])
 
-            if self.visualize:
-                origin_lidar = \
-                    np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
-                origin_lidar = torch.from_numpy(origin_lidar)
-                output_dict['ego'].update({'origin_lidar': origin_lidar})
-            output_dict_list.append(output_dict)
-        ego_indices_batch = [torch.from_numpy(np.array(batch[i][1])) for i in range(len(batch))]
-        return output_dict_list, ego_indices_batch
+            # Collate the stacked agent data into tensors
+            merged_feature_dict = merge_features_to_dict(processed_lidar_list)
+            velocity_list = torch.from_numpy(np.array(velocity_list)).float()
+            time_delay_list = torch.from_numpy(np.array(time_delay_list)).float()
+            infra_list = torch.from_numpy(np.array(infra_list)).float()
+
+            ## NEW ##: Convert the gathered timestamps into a tensor
+            agent_timestamps_list = torch.from_numpy(np.array(agent_timestamps_list)).float()
+
+            # Create the final batched dictionary for this frame
+            final_frame_dict = {
+                'ego': {
+                    'object_bbx_center': torch.from_numpy(np.array(object_bbx_center_list)).float(),
+                    'object_bbx_mask': torch.from_numpy(np.array(object_bbx_mask_list)).float(),
+                    'processed_lidar': merged_feature_dict,
+                    'record_len': torch.from_numpy(np.array(record_len)),
+                    'velocity': velocity_list,
+                    'time_delay': time_delay_list,
+                    'infra': infra_list,
+                    'pairwise_t_matrix': torch.from_numpy(np.array(pairwise_t_matrix_list)).float(),
+                    'spatial_correction_matrix': torch.from_numpy(np.array(spatial_correction_matrix_list)).float(),
+
+                    ## NEW ##: Add the final batched tensor to the dictionary
+                    'agent_timestamps': agent_timestamps_list
+                }
+            }
+            output_data_list.append(final_frame_dict)
+
+        # Collate the ego historical indices (this part is simpler)
+        # Note: This might need adjustment if history lengths are variable and require padding
+        collated_ego_indices = torch.stack([torch.from_numpy(np.array(indices)) for indices in ego_indices_batch])
+
+        return output_data_list, collated_ego_indices
     
     def collate_batch_test(self, batch):
             # output_dict_list = []
