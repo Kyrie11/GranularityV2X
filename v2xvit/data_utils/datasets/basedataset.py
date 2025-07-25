@@ -728,32 +728,32 @@ class BaseDataset(Dataset):
                                       save_path,
                                       dataset=dataset)
 
-
+    # Add this method inside the BaseDataset class. It's a more advanced replacement for retrieve_multi_data
     def retrieve_lsh_data(self, idx, m, n, p, cur_ego_pose_flag=True):
         """
-            Retrieves Long-Short History (LSH) data for all agents.
+        Retrieves Long-Short History (LSH) data for all agents.
 
-            For each required historical frame of the ego-vehicle, this function
-            assembles a corresponding "snapshot" of data from all other agents,
-            respecting their individual, calculated delays.
+        For each required historical frame of the ego-vehicle, this function
+        assembles a corresponding "snapshot" of data from all other agents,
+        respecting their individual, calculated delays.
 
-            Parameters
-            ----------
-            idx : int
-                The dataset index, corresponding to the ego-vehicle's current timestamp.
-            m : int, n : int, p : int
-                Parameters for Long-Short History.
-            cur_ego_pose_flag : bool
-                Flag to use the current ego pose for all transformations.
+        Parameters
+        ----------
+        idx : int
+            The dataset index, corresponding to the ego-vehicle's current timestamp.
+        m : int, n : int, p : int
+            Parameters for Long-Short History.
+        cur_ego_pose_flag : bool
+            Flag to use the current ego pose for all transformations.
 
-            Returns
-            -------
-            output_data_dicts : list
-                A list of OrderedDicts. Each OrderedDict is a "snapshot" containing
-                the base data for all agents at a specific historical time.
+        Returns
+        -------
+        output_data_dicts : list
+            A list of OrderedDicts. Each OrderedDict is a "snapshot" containing
+            the base data for all agents at a specific historical time.
 
-            timestamp_index: int
-                The timestamp index of the current frame for the ego vehicle.
+        timestamp_index: int
+            The timestamp index of the current frame for the ego vehicle.
         """
         # 1. Find scenario and ego's current timestamp index (relative to scenario)
         scenario_index = 0
@@ -784,47 +784,46 @@ class BaseDataset(Dataset):
                 ego_content = cav_content
                 break
 
-            # 4. Loop through each of the ego's target frames and build a snapshot
-            output_data_dicts = []
-            for target_ego_idx in ego_target_indices:
-                snapshot_data = OrderedDict()
-                # The offset of this historical frame from the present
-                offset = timestamp_index - target_ego_idx
+        # 4. Loop through each of the ego's target frames and build a snapshot
+        output_data_dicts = []
+        for target_ego_idx in ego_target_indices:
+            snapshot_data = OrderedDict()
+            # The offset of this historical frame from the present
+            offset = timestamp_index - target_ego_idx
 
-                # Loop through every agent in the scenario to get its corresponding data
-                for cav_id, cav_content in scenario_database.items():
-                    delay = agent_delays[cav_id]
+            # Loop through every agent in the scenario to get its corresponding data
+            for cav_id, cav_content in scenario_database.items():
+                delay = agent_delays[cav_id]
 
-                    # Calculate the agent's target index for this snapshot
-                    # Start from its delayed time, and apply the same offset
-                    agent_delayed_start_idx = timestamp_index - delay
-                    target_agent_idx = agent_delayed_start_idx - offset
+                # Calculate the agent's target index for this snapshot
+                # Start from its delayed time, and apply the same offset
+                agent_delayed_start_idx = timestamp_index - delay
+                target_agent_idx = agent_delayed_start_idx - offset
 
-                    # Boundary check: clamp to the first frame if index is too small
-                    target_agent_idx = max(0, target_agent_idx)
+                # Boundary check: clamp to the first frame if index is too small
+                target_agent_idx = max(0, target_agent_idx)
 
-                    # Get the actual data for the agent at its calculated historical index
-                    timestamp_key_delay = self.return_timestamp_key(scenario_database, target_agent_idx)
+                # Get the actual data for the agent at its calculated historical index
+                timestamp_key_delay = self.return_timestamp_key(scenario_database, target_agent_idx)
 
-                    reformed_params = self.reform_param(cav_content,
-                                                        ego_content,
-                                                        current_timestamp_key,  # Ego pose is ALWAYS current
-                                                        timestamp_key_delay,  # Agent data is from its past
-                                                        cur_ego_pose_flag)
+                reformed_params = self.reform_param(cav_content,
+                                                    ego_content,
+                                                    current_timestamp_key,  # Ego pose is ALWAYS current
+                                                    timestamp_key_delay,  # Agent data is from its past
+                                                    cur_ego_pose_flag)
 
-                    lidar_np = pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
+                lidar_np = pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
 
-                    # Assemble the single agent's data for this snapshot
-                    snapshot_data[cav_id] = OrderedDict()
-                    snapshot_data[cav_id]['ego'] = cav_content['ego']
-                    snapshot_data[cav_id]['params'] = reformed_params
-                    snapshot_data[cav_id]['lidar_np'] = lidar_np
-                    # We don't need to add time_delay here as it's already been applied
+                # Assemble the single agent's data for this snapshot
+                snapshot_data[cav_id] = OrderedDict()
+                snapshot_data[cav_id]['ego'] = cav_content['ego']
+                snapshot_data[cav_id]['params'] = reformed_params
+                snapshot_data[cav_id]['lidar_np'] = lidar_np
+                # We don't need to add time_delay here as it's already been applied
 
-                output_data_dicts.append(snapshot_data)
+            output_data_dicts.append(snapshot_data)
 
-            return output_data_dicts, agent_delays, ego_target_indices
-
+        return output_data_dicts, agent_delays, ego_target_indices
 
     @staticmethod
     def __generate_lsh_inference(start_index, m, n, p, max_len):
