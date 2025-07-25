@@ -104,8 +104,7 @@ class PointPillarHow2comm(nn.Module):
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
-        print(f"short_his_g1.shape={short_his_g1[0].shape}")
-        print(f"short_his_g2.shape={short_his_g2.shape}")
+
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
         short_his = [short_his_g1, short_his_g2, short_his_g3]
         long_his = [long_his_g1, long_his_g2, long_his_g3]
