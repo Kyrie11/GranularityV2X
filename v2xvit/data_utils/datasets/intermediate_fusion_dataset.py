@@ -306,6 +306,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             # and current timestamp
             spatial_correction_matrix_list = []
 
+            agent_timestamps = []
             if self.visualize:
                 origin_lidar = []
 
@@ -326,7 +327,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 spatial_correction_matrix_list.append(
                     ego_dict['spatial_correction_matrix'])
                 pairwise_t_matrix_list.append(ego_dict['pairwise_t_matrix'])
-
+                agent_timestamps.append(ego_dict['agent_timestamps'])
                 if self.visualize:
                     origin_lidar.append(ego_dict['origin_lidar'])
             # convert to numpy, (B, max_num, 7)
@@ -354,7 +355,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 torch.stack([velocity, time_delay, infra], dim=-1).float()
             # (B, max_cav)
             pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
-
+            agent_timestamps = torch.from_numpy(np.arrary(agent_timestamps))
             # object id is only used during inference, where batch size is 1.
             # so here we only get the first element.
             output_dict['ego'].update({'object_bbx_center': object_bbx_center,
@@ -366,7 +367,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                                     'prior_encoding': prior_encoding,
                                     'time_delay': time_delay,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
-                                    'pairwise_t_matrix': pairwise_t_matrix})
+                                    'pairwise_t_matrix': pairwise_t_matrix,
+                                    'agent_timestamps': agent_timestamps})
 
             if self.visualize:
                 origin_lidar = \
