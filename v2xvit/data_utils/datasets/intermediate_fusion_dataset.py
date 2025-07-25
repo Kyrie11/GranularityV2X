@@ -352,7 +352,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             # Now, loop through the data for each sample *within this specific frame*
             for i, data in enumerate(frame_batch):
                 # Extract the pre-merged lidar dict for this sample
-                lidar_dict = data['ego']['processed_lidar']
+                record_len.append(data['ego']['cav_num'])
                 agent_lidar_list = data['ego']['processed_lidar']
 
                 for agent_dict in agent_lidar_list:
@@ -362,7 +362,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     coords = agent_dict['voxel_coords']
                     # Add the batch index 'i' as a new column
                     batch_index_column = np.full((coords.shape[0], 1), i)
-                    new_coords = np.hstack([coords, batch_index_column])
+                    new_coords = np.hstack([batch_index_column, coords])
                     # Append the updated coordinates
                     voxel_coords_list.append(new_coords)
 
@@ -371,8 +371,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 object_bbx_mask_list.append(data['ego']['object_bbx_mask'])
                 object_ids_list.append(data['ego']['object_ids'])
 
-                # Data that is batched at the "agent" level
-                record_len.append(data['ego']['cav_num'])
 
                 # Extend the lists with per-agent information
                 velocity_list.extend(data['ego']['velocity'])
