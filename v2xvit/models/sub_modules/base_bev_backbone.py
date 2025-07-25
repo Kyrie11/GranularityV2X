@@ -101,7 +101,8 @@ class BaseBEVBackbone(nn.Module):
 
         for i in range(len(self.blocks)):
             x = self.blocks[i](x)
-
+            if i==0:
+                print("第一个block后的shape是：", x.shape)
             stride = int(spatial_features.shape[2] / x.shape[2])
             ret_dict['spatial_features_%dx' % stride] = x
 
