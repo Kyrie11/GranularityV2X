@@ -269,7 +269,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         return merged_feature_dict
 
-    def collate_batch_train(batch):
+    def collate_batch_train(self, batch):
         """
         Custom collate function for training.
 
