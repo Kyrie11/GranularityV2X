@@ -349,6 +349,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             ## NEW ##: Initialize the list for our new timestamp data
             agent_timestamps_list = []
 
+            # ## THE FIX 1: 初始化 agent 的全局计数器 ##
+            agent_idx_counter = 0
+
             # Now, loop through the data for each sample *within this specific frame*
             for i, data in enumerate(frame_batch):
                 # Extract the pre-merged lidar dict for this sample
@@ -361,10 +364,15 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     # Get the agent's voxel coordinates
                     coords = agent_dict['voxel_coords']
                     # Add the batch index 'i' as a new column
-                    batch_index_column = np.full((coords.shape[0], 1), i)
+                    batch_index_column = np.full((coords.shape[0], 1), agent_idx_counter)
                     new_coords = np.hstack([batch_index_column, coords])
                     # Append the updated coordinates
                     voxel_coords_list.append(new_coords)
+                    agent_idx_counter += 1
+                if not voxel_features_list:
+                    # 您可能需要在这里添加一个逻辑来处理空帧的情况
+                    # 例如，创建一个空的 final_frame_dict 或直接 continue
+                    continue
 
                 # Data that is batched at the "sample" level
                 object_bbx_center_list.append(data['ego']['object_bbx_center'])
