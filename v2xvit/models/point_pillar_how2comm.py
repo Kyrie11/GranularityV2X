@@ -98,9 +98,9 @@ class PointPillarHow2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def forward(self, short_term, long_term):
-        current_data_dict = short_term[0]['ego']
-        delay = current_data_dict['time_delay']
+    def forward(self, current_data, short_term, long_term):
+        current_data_dict = current_data['ego']
+        delay = short_term[0]['ego']['time_delay']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
@@ -137,6 +137,7 @@ class PointPillarHow2comm(nn.Module):
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
+            print(f"record_len检查：{record_len}")
 
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,

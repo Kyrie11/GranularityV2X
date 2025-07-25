@@ -146,6 +146,8 @@ def main():
             if batch_data_list is None:
                 continue
 
+            batch_data_list = train_utils.to_device(batch_data_list)
+
             print(f"一共有{len(batch_data_list)}帧")
             historical_data = batch_data_list[1:]
             short_his_data = historical_data[:n]
@@ -188,7 +190,7 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                ouput_dict = model(short_his_data, long_his_data)
+                ouput_dict = model(current_data, short_his_data, long_his_data)
                 final_loss = criterion(ouput_dict,
                                        current_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
