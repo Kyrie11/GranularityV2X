@@ -27,7 +27,7 @@ train_params:
   frame: &frame 1 # 这个参数现在可以不用了，但为了兼容性可以保留
   temporal_config:
     long_term_stride: 3 #长期历史帧间隔
-    long_term_memory: 3#长期历史帧数
+    long_term_memory: 3 #长期历史帧数
     short_term_memory: 3 #短期历史帧数
 
 
