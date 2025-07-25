@@ -864,3 +864,42 @@ class BaseDataset(Dataset):
         valid_indices.sort(reverse=True)
 
         return valid_indices
+
+    @staticmethod
+    def _generate_lsh_indices(start_index, m, n, p, max_len):
+        """
+        Generates a unique, sorted list of indices for long and short term history.
+
+        Parameters
+        ----------
+        start_index : int
+            The starting timestamp index (e.g., current time or delayed time).
+        m : int
+            Number of long-term history frames.
+        n : int
+            Number of short-term history frames.
+        p : int
+            Period/interval for long-term frames.
+        max_len : int
+            The maximum possible length of the scenario to prevent out-of-bounds.
+            (Although we clamp at 0, this could be used for further checks).
+
+        Returns
+        -------
+        list
+            A list of unique, valid timestamp indices, sorted in descending order.
+        """
+        # Generate short-term indices: [t, t-1, t-2, ..., t-(n-1)]
+        short_indices = [start_index - i for i in range(n)]
+
+        # Generate long-term indices: [t, t-p, t-2p, ..., t-(m-1)p]
+        long_indices = [start_index - i * p for i in range(m)]
+
+        # Combine, get unique indices, and filter out any negative indices
+        combined_indices = list(set(short_indices + long_indices))
+        valid_indices = [i for i in combined_indices if i >= 0]
+
+        # Sort in descending order to have the latest timestamp first
+        valid_indices.sort(reverse=True)
+
+        return valid_indices
