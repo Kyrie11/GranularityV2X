@@ -213,7 +213,7 @@ class PointPillarHow2comm(nn.Module):
         points_mean = points_sum / safe_voxel_num_points
         points_sq_sum = torch.sum(masked_voxel_features[:, :, :3] ** 2, dim=1)
         points_mean_sq = points_sq_sum / safe_voxel_num_points
-        variance = torch.clamp(points_mean_sq - points_mean ** 2) #确保方差非负
+        variance = torch.clamp(points_mean_sq - points_mean ** 2, min=0) #确保方差非负
         # 通道 5, 6, 7: x, y, z 方差 (x, y, z variance)
         xyz_variance = variance.split(1, dim=-1)
         x_variance, y_variance, z_variance = xyz_variance[0], xyz_variance[1], xyz_variance[2]
