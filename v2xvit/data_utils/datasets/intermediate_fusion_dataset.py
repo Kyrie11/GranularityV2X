@@ -31,6 +31,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
     # In IntermediateFusionDataset class
 
+    # In IntermediateFusionDataset class
+
     def __getitem__(self, idx):
         # 1. Get LSH parameters
         m = self.params['train_params']['lsh']['m']
@@ -75,7 +77,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             processed_features, object_stack, object_id_stack = [], [], []
             velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
 
-            ## NEW ##: Initialize a list to store absolute timestamps for this frame
             agent_timestamps = []
 
             for cav_id in cav_id_list:
@@ -99,49 +100,40 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 # Calculate and append delay and the absolute timestamp
                 if i == 0:  # This is the Ground Truth frame
                     time_delay.append(0.0)
-                    ## NEW ##: All agents have the same current timestamp in the GT frame
-                    agent_timestamps.append(float(current_timestamp))
+                    agent_timestamps.append(current_timestamp)
                 else:  # This is a historical frame
                     frame_delay = float(agent_delays[cav_id])
                     time_delay.append(frame_delay)
-                    ## NEW ##: Calculate the agent's absolute timestamp
-                    # ego_historical_indices[i-1] is the ego-vehicle's timestamp for this frame
+
+                    # ego_historical_indices is a list of ints, not a tensor. No .item() needed.
                     ego_timestamp_for_this_frame = ego_historical_indices[i - 1]
                     agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
-                    agent_timestamps.append(float(agent_absolute_timestamp))
+                    agent_timestamps.append(agent_absolute_timestamp)
 
             if not processed_features:
                 continue
 
-            # ... (Post-processing like unique_indices, stacking, masking, etc. is unchanged) ...
+            # ... (Post-processing logic remains unchanged) ...
             unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
             object_stack = np.vstack(object_stack)[unique_indices]
-
             object_bbx_center = np.zeros((self.params['postprocess']['max_num'], 7))
             mask = np.zeros(self.params['postprocess']['max_num'])
             object_bbx_center[:object_stack.shape[0], :] = object_stack
             mask[:object_stack.shape[0]] = 1
-
             cav_num = len(processed_features)
             merged_feature_dict = self.merge_features_to_dict(processed_features)
             anchor_box = self.post_processor.generate_anchor_box()
             label_dict = self.post_processor.generate_label(
                 gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
-
-            # Padding for all lists to max_cav length
             velocity += (self.max_cav - len(velocity)) * [0.]
             time_delay += (self.max_cav - len(time_delay)) * [0.]
             infra += (self.max_cav - len(infra)) * [0.]
-            ## NEW ##: Pad the new timestamp list as well
-            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0. ]  # Use 0 as padding value
-
+            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0]
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
             padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
             spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
 
-            # Update the final dictionary for this snapshot
             processed_data_dict['ego'].update({
-                'agent_timestamps': agent_timestamps,
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': [object_id_stack[i] for i in unique_indices],
@@ -153,9 +145,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 'time_delay': time_delay,
                 'infra': infra,
                 'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix
-                ## NEW ##: Add the list of agent timestamps to the output dictionary
-
+                'pairwise_t_matrix': pairwise_t_matrix,
+                'agent_timestamps': agent_timestamps
             })
             processed_data_list.append(processed_data_dict)
 
