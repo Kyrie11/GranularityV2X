@@ -145,15 +145,20 @@ def main():
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-            for batch_data  in batch_data_list:
-                timestamps = batch_data['ego']['agent_timestamps']
-                print(f"时间戳：{timestamps}")
+
             print(f"一共有{len(batch_data_list)}帧")
             historical_data = batch_data_list[1:]
             short_his_data = historical_data[:n]
             long_his_data = []
 
             historical_ego_indices = ego_indices_batch[0]
+            for j, frame_data in enumerate(historical_data):
+                # The ego timestamp for this frame is the j-th element in the historical index list
+                ego_ts_for_frame = historical_ego_indices[j].item()
+                agent_ts_list = frame_data['ego']['agent_timestamps']
+
+                print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
+                print(f"  > Agent Timestamps: {agent_ts_list}")
             print(f"historical_ego_indices={historical_ego_indices}")
             if historical_ego_indices.nelement() > 0:
                 # The timeline starts from the most recent historical frame (e.g., t-1)
