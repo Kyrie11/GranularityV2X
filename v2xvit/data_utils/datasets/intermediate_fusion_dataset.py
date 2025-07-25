@@ -269,6 +269,37 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         return merged_feature_dict
 
+    @staticmethod
+    def merge_features_to_dict(processed_feature_list):
+        """
+        Merge the preprocessed features from different cavs to the same
+        dictionary.
+
+        Parameters
+        ----------
+        processed_feature_list : list
+            A list of dictionary containing all processed features from
+            different cavs.
+
+        Returns
+        -------
+        merged_feature_dict: dict
+            key: feature names, value: list of features.
+        """
+
+        merged_feature_dict = OrderedDict()
+
+        for i in range(len(processed_feature_list)):
+            for feature_name, feature in processed_feature_list[i].items():
+                if feature_name not in merged_feature_dict:
+                    merged_feature_dict[feature_name] = []
+                if isinstance(feature, list):
+                    merged_feature_dict[feature_name] += feature
+                else:
+                    merged_feature_dict[feature_name].append(feature)
+
+        return merged_feature_dict
+
     def collate_batch_train(self, batch):
         """
         Custom collate function for training.
