@@ -99,36 +99,29 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, short_term, long_term):
-        delay = 0
+        short_his_g1, short_his_g2, short_his_g3 = [], [], []
         batch_dict_list = []
+        feature_list = []
         feature_2d_list = []
         matrix_list = []
-        his_vox = []
-        his_feat = []
-        his_det = []
+        regroup_feature_list = []
+        regroup_feature_list_large = []
+
         for origin_data in short_term:
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']
             voxel_coords = data_dict['processed_lidar']['voxel_coords']
             voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
             record_len = data_dict['record_len']
+
             pairwise_t_matrix = data_dict['pairwise_t_matrix']
             batch_dict = {'voxel_features': voxel_features,
                           'voxel_coords': voxel_coords,
-                              'voxel_num_points': voxel_num_points,
+                          'voxel_num_points': voxel_num_points,
                           'record_len': record_len}
-            print("voxel_features.shape=", voxel_features.shape)
-            print("voxel_coords.shape=", voxel_coords.shape)
             # n, 4 -> n, c encoding voxel feature using point-pillar method
             batch_dict = self.pillar_vfe(batch_dict)
-            pillar_features = batch_dict['pillar_features']
-            print("pillar_features.shape=", pillar_features.shape)
             # n, c -> N, C, H, W
-            vox_bev = batch_dict['vox_bev']
-            print("vox_bev.shape=", vox_bev.shape)
-            # 下采样
-            vox_bev = F.interpolate(vox_bev, scale_factor=0.5, mode="bilinear", align_corners=False)
-            his_vox.append(vox_bev)
             batch_dict = self.scatter(batch_dict)
             batch_dict = self.backbone(batch_dict)
             # N, C, H', W'
@@ -145,155 +138,131 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
+            print("spatial_features_2d.shape=", spatial_features_2d.shape)
+            g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
+            print("vox_bev.shape=", g1.shape)
+            psm = self.cls_head(spatial_features_2d)
+            rm = self.regroup(spatial_features_2d)
+            g3 = self.get_g3_bev(psm, rm)
+            print("det_bev.shape=", g3.shape)
             batch_dict_list.append(batch_dict)
             spatial_features = batch_dict['spatial_features']
-            spatial_features = self.avg_pool(spatial_features)
-            his_feat.append(spatial_features)
-
-            # feature_2d_list.append(spatial_features_2d)
+            feature_list.append(spatial_features)
+            feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
-
-
-
-            psm = self.cls_head(spatial_features_2d)
-            rm = self.reg_head(spatial_features_2d)
-
-            B, anchor_num, H, W = psm.shape
-            prob = torch.sigmoid(psm)
-            max_probs, best_anchor_indices = torch.max(prob, dim=1)
-            confidence_mask = max_probs > self.score_threshold
-            object_map = torch.zeros(B, 8, H, W, device=psm.device, dtype=psm.dtype)
-            if confidence_mask.any():
-                object_map[:,0,:,:][confidence_mask] = max_probs[confidence_mask]
-                rm_reshaped = rm.view(B, anchor_num, 7, H, W)
-                indices_for_gather = best_anchor_indices.unsqueeze(1).unsqueeze(1).expand(-1,-1,7,-1,-1)
-                selected_rm = torch.gather(rm_reshaped, dim=1, index=indices_for_gather)
-                selected_rm = selected_rm.squeeze(1)
-                expanded_confidence_mask = confidence_mask.unsqueeze(1).expand(-1,7,-1,-1)
-                object_map[:,1:,:,:][expanded_confidence_mask] = selected_rm[expanded_confidence_mask]
-            # temporal_output_dict = {'psm':psm, 'rm':rm}
-            # detections = self.post_process(dataset, temporal_output_dict, record_len)
-            # det_bev = torch.cat([psm, rm], dim=1)
-            his_det.append(object_map)
+            regroup_feature_list.append(self.regroup(
+                spatial_features_2d, record_len))
+            regroup_feature_list_large.append(
+                self.regroup(spatial_features, record_len))
 
         pairwise_t_matrix = matrix_list[0].clone().detach()
 
-        # spatial_features_2d = feature_2d_list[0]
+        history_feature = transform_feature(regroup_feature_list_large, self.delay)
+        spatial_features = feature_list[0]
+        spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
+        psm_single = self.cls_head(spatial_features_2d)
 
-        vox_bev = his_vox[0]
-        feat_bev = his_feat[0]
-        det_bev = his_det[0]
+        # if delay == 0:
+        #     fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+        #         g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
+        # elif delay > 0:
+        #     fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
+        #         g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
+        # print("fused_feat_list.shape=",fused_feature.shape)
+        # # if self.shrink_flag:
+        # #     fused_feature = self.shrink_conv(fused_feature)
+        #
+        # psm = self.cls_head(fused_feature)
+        # rm = self.reg_head(fused_feature)
+        # output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
+        # return output_dict
+        return None
 
-        if delay == 0:
-            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
-        elif delay > 0:
-            fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                g1_data=vox_bev, g2_data=feat_bev, g3_data=det_bev, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, his_vox=his_vox, his_feat=his_feat, his_det=his_det)
-        print("fused_feat_list.shape=",fused_feature.shape)
-        # if self.shrink_flag:
-        #     fused_feature = self.shrink_conv(fused_feature)
+    def get_g1_bev(self, voxel_features, voxel_num_points, coords):
+        max_points = voxel_features.shape[1]
+        mask = self.pillar_vfe.get_paddings_indicator(voxel_num_points, max_points, axis=0)
+        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
 
-        psm = self.cls_head(fused_feature)
-        rm = self.reg_head(fused_feature)
-        output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
-        return output_dict
+        #用掩码将无效填充点的数据清零
+        masked_voxel_features = voxel_features * mask
+
+        #计算8个物理量
+        #为了避免除以0，添加一个极小值
+        epsilon = 1e-6
+        safe_voxel_num_points = voxel_num_points.view(-1, 1).float() + epsilon
+        # 通道0：点数
+        num_points_feat = voxel_num_points.view(-1, 1).float()
+        # 通道 1: 平均强度 (Mean intensity) - 强度在第3个索引
+        mean_intensity = torch.sum(masked_voxel_features[:,:,3], dim=1, keepdim=True) / safe_voxel_num_points
+        # 通道 2: 平均高度 (Mean height) - z坐标在第2个索引
+        mean_height = torch.sum(masked_voxel_features[:, :, 2], dim=1, keepdim=True) / safe_voxel_num_points
+        # 通道 3: 最高点高度 (Max height)
+        # 将掩码外的值设为极小值, 以免影响max的计算
+        max_height = (masked_voxel_features[:, :, 2] + (1 - mask.squeeze(-1)) * -1e6).max(dim=1, keepdim=True)[0]
+        # 通道 4: 高度跨度 (Height span)
+        # 将掩码外的值设为极大值, 以免影响min的计算
+        min_height = (masked_voxel_features[:, :, 2] + (1 - mask.squeeze(-1)) * 1e6).min(dim=1, keepdim=True)[0]
+        height_span = max_height - min_height
+        # 计算方差需要更精细的操作，以确保只在有效点上计算
+        points_sum = torch.sum(masked_voxel_features[:, :, :3], dim=1)  # (M, 3)
+        points_mean = points_sum / safe_voxel_num_points
+        points_sq_sum = torch.sum(masked_voxel_features[:, :, :3] ** 2, dim=1)
+        points_mean_sq = points_sq_sum / safe_voxel_num_points
+        variance = points_mean_sq - points_mean ** 2
+        # 通道 5, 6, 7: x, y, z 方差 (x, y, z variance)
+        xyz_variance = variance.split(1, dim=-1)
+        x_variance, y_variance, z_variance = xyz_variance[0], xyz_variance[1], xyz_variance[2]
+        # 4. 将8个特征合并
+        # Shape: (M, 8)
+        physical_pillar_features = torch.cat([
+            num_points_feat, mean_intensity, mean_height,
+            max_height, height_span, x_variance, y_variance, z_variance
+        ], dim=1)
+
+        # 5. 将物理特征散射到BEV图上 (借鉴PointPillarScatter的逻辑)
+        # batch_size, H, W 可以从self.scatter获取
+        batch_size = coords[:, 0].max().int().item() + 1
+        H, W = self.scatter.ny, self.scatter.nx
+
+        # 创建空的BEV画布
+        physical_bev_map = torch.zeros(
+            batch_size, 8, H, W,  # 8个通道
+            dtype=physical_pillar_features.dtype,
+            device=physical_pillar_features.device)
+
+        # 获取每个pillar在BEV图中的一维索引
+        # this_coords[:, 1] 是 z_idx, this_coords[:, 2] 是 y_idx, this_coords[:, 3] 是 x_idx
+        bev_indices = coords[:, 2] * W + coords[:, 3]  # y * W + x
+        bev_indices = bev_indices.long()
+
+        # 使用scatter_函数进行高效赋值
+        # 我们需要将 (batch_idx, pillar_idx) 映射到 (batch_idx, channel_idx, bev_idx)
+        # 首先处理每个batch
+        for b_idx in range(batch_size):
+            batch_mask = (coords[:, 0] == b_idx)
+            # 将当前batch的pillar特征 (num_pillars_in_batch, 8) 放到对应的BEV位置
+            physical_bev_map[b_idx].view(8, H * W).T[bev_indices[batch_mask]] = physical_pillar_features[batch_mask]
+
+        return physical_bev_map
 
 
-    def post_process(self, dataset, output_dict, record_len):
-        psm = output_dict['psm']
-        rm  = output_dict['rm']
+    def get_g3_bev(self, psm, rm):
+        N, anchor_num, H, W = psm.shape
+        prob = torch.sigmoid(psm)
+        max_probs, best_anchor_indices = torch.max(prob, dim=1)
+        confidence_mask = max_probs > self.score_threshold
+        object_map = torch.zeros(N, 8, H, W, device=psm.device, dtype=psm.dtype)
+        if confidence_mask.any():
+            object_map[:, 0, :, :][confidence_mask] = max_probs[confidence_mask]
+            rm_reshaped = rm.view(N, anchor_num, 7, H, W)
+            indices_for_gather = best_anchor_indices.unsqueeze(1).unsqueeze(1).expand(-1, -1, 7, -1, -1)
+            selected_rm = torch.gather(rm_reshaped, dim=1, index=indices_for_gather)
+            selected_rm = selected_rm.squeeze(1)
+            expanded_confidence_mask = confidence_mask.unsqueeze(1).expand(-1, 7, -1, -1)
+            object_map[:, 1:, :, :][expanded_confidence_mask] = selected_rm[expanded_confidence_mask]
+        return object_map
 
-        anchor_box = dataset.post_processor.generate_anchor_box()
-        anchor_box = torch.tensor(anchor_box)
-        anchor_box = anchor_box.to(psm.device)
 
-        psm_by_batch = self.regroup(psm, record_len)
-        rm_by_batch = self.regroup(rm, record_len)
 
-        detections_by_batch = []
-        batch_size = len(record_len)
-
-        for i in range(batch_size):
-            num_agents_in_sample = record_len[i]
-            sample_detections = {}
-
-            for j in range(num_agents_in_sample):
-                agent_psm = psm_by_batch[i][j].unsqueeze(0)
-                agent_rm = rm_by_batch[i][j].unsqueeze(0)
-
-                local_boxes, local_scores = self.decode_single_agent_output(psm=agent_psm, rm=agent_rm, anchor_box=anchor_box)
-
-                agent_key = f"agent_{j}"
-                sample_detections[agent_key] = {
-                    'box_tensor': local_boxes,
-                    'score_tensor': local_scores
-                }
-
-            detections_by_batch.append(sample_detections)
-        return detections_by_batch
-
-    def decode_single_agent_output(self, psm, rm, anchor_box):
-        """
-            Decodes the raw output of a single agent into a list of bounding boxes
-            and scores, without any coordinate transformation or NMS.
-        """
-        prob = torch.sigmoid(psm.permute(0, 2, 3, 1))
-        prob = prob.reshape(1, -1)
-        batch_box3d = self.delta_to_boxes3d(rm, anchor_box)
-        mask = torch.gt(prob, self.score_threshold)
-        mask = mask.view(1, -1)
-        mask_reg = mask.unsqueeze(2).repeat(1, 1, 7)
-        decoded_boxes = torch.masked_select(batch_box3d[0], mask_reg[0]).view(-1, 7)
-        decoded_scores = torch.masked_select(prob[0], mask[0])
-
-        return decoded_boxes, decoded_scores
-
-    def delta_to_boxes3d(self, deltas, anchors):
-        """
-        Convert the output delta to 3d bbx.
-
-        Parameters
-        ----------
-        deltas : torch.Tensor
-            (N, W, L, 14)
-        anchors : torch.Tensor
-            (W, L, 2, 7) -> xyzhwlr
-
-        Returns
-        -------
-        box3d : torch.Tensor
-            (N, W*L*2, 7)
-        """
-        # batch size
-        N = deltas.shape[0]
-        deltas = deltas.permute(0, 2, 3, 1).contiguous().view(N, -1, 7)
-        boxes3d = torch.zeros_like(deltas)
-
-        if deltas.is_cuda:
-            anchors = anchors.cuda()
-            boxes3d = boxes3d.cuda()
-
-        # (W*L*2, 7)
-        anchors_reshaped = anchors.view(-1, 7).float()
-        # the diagonal of the anchor 2d box, (W*L*2)
-        anchors_d = torch.sqrt(
-            anchors_reshaped[:, 4] ** 2 + anchors_reshaped[:, 5] ** 2)
-        anchors_d = anchors_d.repeat(N, 2, 1).transpose(1, 2)
-        anchors_reshaped = anchors_reshaped.repeat(N, 1, 1)
-
-        # Inv-normalize to get xyz
-        boxes3d[..., [0, 1]] = torch.mul(deltas[..., [0, 1]], anchors_d) + \
-                               anchors_reshaped[..., [0, 1]]
-        boxes3d[..., [2]] = torch.mul(deltas[..., [2]],
-                                      anchors_reshaped[..., [3]]) + \
-                            anchors_reshaped[..., [2]]
-        # hwl
-        boxes3d[..., [3, 4, 5]] = torch.exp(
-            deltas[..., [3, 4, 5]]) * anchors_reshaped[..., [3, 4, 5]]
-        # yaw angle
-        boxes3d[..., 6] = deltas[..., 6] + anchors_reshaped[..., 6]
-
-        return boxes3d
