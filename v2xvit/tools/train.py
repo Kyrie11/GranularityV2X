@@ -146,7 +146,7 @@ def main():
             if batch_data_list is None:
                 continue
 
-            batch_data_list = train_utils.to_device(batch_data_list)
+            # batch_data_list = train_utils.to_device(batch_data_list, device)
 
             print(f"一共有{len(batch_data_list)}帧")
             historical_data = batch_data_list[1:]
