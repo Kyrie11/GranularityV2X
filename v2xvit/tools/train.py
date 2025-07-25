@@ -38,6 +38,7 @@ def main():
     n = hypes['train_params']['lsh']['n']
     m = hypes['train_params']['lsh']['m']
     p = hypes['train_params']['lsh']['p']
+    batch_size = hypes['train_params']['batch_size']
 
     multi_gpu_utils.init_distributed_mode(opt)
 
@@ -146,30 +147,26 @@ def main():
             if batch_data_list is None:
                 continue
 
-            print(f"一共取出了{len(batch_data_list)}帧")
             short_his_data = batch_data_list[:n]
-
-            # Long-term history needs to be selected carefully
             long_his_data = []
 
-            # Let's assume a batch size of 1 for simplicity in this example.
-            # For batch_size > 1, you would need a loop.
-            # ego_indices_batch is a list of tensors, one per batch item.
-            current_ego_indices = ego_indices_batch[0]  # Shape: [num_history_frames]
-            print("current_ego_indices：", current_ego_indices)
-            # 1. Determine the target long-term timestamps for this specific sample
-            start_index = current_ego_indices[0].item()  # The most recent timestamp
-            target_long_indices = [start_index - j * p for j in range(m)]
-            print(f"target_long_indices:{target_long_indices}")
+            for b in range(batch_size):
+                batch_long_his_data = []
+                current_ego_indices = ego_indices_batch[b]
+                print("current_ego_indices：", current_ego_indices)
+                start_index = current_ego_indices[0].item()  # The most recent timestamp
+                target_long_indices = [start_index - j * p for j in range(m)]
+                print(f"target_long_indices:{target_long_indices}")
+                # 2. Find where these target timestamps are located in our batch data
+                for target_idx in target_long_indices:
+                    # Find the position of target_idx in the list of available frames
+                    match_pos = (current_ego_indices == target_idx).nonzero(as_tuple=True)[0]
+                    if match_pos.nelement() > 0:
+                        # We found it, now grab the corresponding data snapshot
+                        frame_index = match_pos.item()
+                        batch_long_his_data.append(batch_data_list[frame_index])
+                long_his_data.append(batch_long_his_data)
 
-            # 2. Find where these target timestamps are located in our batch data
-            for target_idx in target_long_indices:
-                # Find the position of target_idx in the list of available frames
-                match_pos = (current_ego_indices == target_idx).nonzero(as_tuple=True)[0]
-                if match_pos.nelement() > 0:
-                    # We found it, now grab the corresponding data snapshot
-                    frame_index = match_pos.item()
-                    long_his_data.append(batch_data_list[frame_index])
             current_data = batch_data_list[0]
             data_dict = current_data['ego']
             delay_tensor = data_dict['time_delay']
