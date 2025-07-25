@@ -160,6 +160,7 @@ def main():
             # 1. Determine the target long-term timestamps for this specific sample
             start_index = current_ego_indices[0].item()  # The most recent timestamp
             target_long_indices = [start_index - j * p for j in range(m)]
+            print(f"target_long_indices:{target_long_indices}")
 
             # 2. Find where these target timestamps are located in our batch data
             for target_idx in target_long_indices:
@@ -172,7 +173,7 @@ def main():
             current_data = batch_data_list[0]
             data_dict = current_data['ego']
             delay_tensor = data_dict['time_delay']
-            print(f"len(delay_tensor[0])={len(delay_tensor)}")
+            print(f"delay_tensor.shape={delay_tensor.shape}")
             print("delay_tensor:",delay_tensor)
             # the model will be evaluation mode during validation
             model.train()
