@@ -6,8 +6,9 @@ root_dir: '/home/senzeyu2/dataset/opv2v/train'
 validate_dir: '/home/senzeyu2/dataset/opv2v/validate'
 
 wild_setting:
-  async: false
-  async_overhead: 0
+  async: true #为true时开启延迟模式
+  async_mode: real #real表示开启真实值随机模拟，sim表示固定延迟
+  async_overhead: 200 #单位为ms
   seed: 20
   loc_err: false
   xyz_std: 0
