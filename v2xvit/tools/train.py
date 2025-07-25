@@ -146,8 +146,9 @@ def main():
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-
+            print("单帧数据的shape为：{batch_data_list[i].shape}")
             short_his_data = batch_data_list[:n]
+
             long_his_data = []
 
             for b in range(batch_size):
@@ -164,7 +165,7 @@ def main():
                     if match_pos.nelement() > 0:
                         # We found it, now grab the corresponding data snapshot
                         frame_index = match_pos.item()
-                        batch_long_his_data.append(batch_data_list[frame_index])
+                        batch_long_his_data.append(batch_data_list[frame_index][b])
                 long_his_data.append(batch_long_his_data)
 
             current_data = batch_data_list[0]
@@ -183,17 +184,17 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                ouput_dict = model(short_term_history_data, long_term_history_data)
+                ouput_dict = model(short_his_data, long_his_data)
                 final_loss = criterion(ouput_dict,
-                                       batch_data['ego']['label_dict'])
+                                       current_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
-                    ouput_dict = model(short_term_history_data, long_term_history_data)
+                    ouput_dict = model(short_his_data, long_his_data)
                     # first argument is always your output dictionary,
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
-                                       batch_data['ego']['label_dict'])
+                                       current_data['ego']['label_dict'])
                     final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)
