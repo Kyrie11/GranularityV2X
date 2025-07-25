@@ -275,7 +275,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         for j in range(num_history_frames):
             output_dict = {'ego': {}}
-            delay_list = []  # To collect delays for this snapshot
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
@@ -308,7 +307,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 processed_lidar_list.append(ego_dict['processed_lidar'])
                 record_len.append(ego_dict['cav_num'])
                 # The 'delay' is a list of delays for agents in this sample. We extend our batch-wide list.
-                delay_list.extend(ego_dict['delay'][:ego_dict['cav_num']])  # Use cav_num to get unpadded delays
                 label_dict_list.append(ego_dict['label_dict'])
 
                 velocity.append(ego_dict['velocity'])
@@ -331,7 +329,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 self.pre_processor.collate_batch(merged_feature_dict)
             # [2, 3, 4, ..., M]
             record_len = torch.from_numpy(np.array(record_len, dtype=int))
-            delay = torch.from_numpy(np.array(delay_list)).int()
             label_torch_dict = \
                 self.post_processor.collate_batch(label_dict_list)
 
@@ -356,7 +353,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                                     'label_dict': label_torch_dict,
                                     'object_ids': object_ids[0],
                                     'prior_encoding': prior_encoding,
-                                    'delay': delay,
+                                    'time_delay': time_delay,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
                                     'pairwise_t_matrix': pairwise_t_matrix})
 

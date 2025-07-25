@@ -171,7 +171,7 @@ def main():
                     long_his_data.append(batch_data_list[frame_index])
             current_data = batch_data_list[0]
             data_dict = current_data['ego']
-            delay_tensor = data_dict['delay']
+            delay_tensor = data_dict['time_delay']
             print("delay_tensor:",delay_tensor)
             # the model will be evaluation mode during validation
             model.train()
