@@ -145,7 +145,9 @@ def main():
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-
+            for batch_data  in batch_data_list:
+                timestamps = batch_data['ego']['agent_timestamps']
+                print(f"时间戳：{timestamps}")
             print(f"一共有{len(batch_data_list)}帧")
             historical_data = batch_data_list[1:]
             short_his_data = historical_data[:n]

@@ -79,6 +79,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             processed_features, object_stack, object_id_stack = [], [], []
             velocity, time_delay, infra, spatial_correction_matrix = [], [], [], []
 
+            ## NEW ##: Initialize a list to store absolute timestamps for this frame
+            agent_timestamps = []
+
             # Use the single cav_id_list determined from the GT frame
             for cav_id in cav_id_list:
                 if cav_id not in base_data_dict:
@@ -99,9 +102,12 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 # ** CRITICAL CHANGE: Set delay based on frame type **
                 if i == 0:  # This is the Ground Truth frame
                     time_delay.append(0.0)
+                    agent_timestamps.append(current_timestamp)
                 else:  # This is a historical frame
                     time_delay.append(float(agent_delays[cav_id]))
-
+                    ego_timestamp_for_this_frame = ego_historical_indices[i - 1].item()
+                    agent_absolute_timestamp = ego_timestamp_for_this_frame - frame_delay
+                    agent_timestamps.append(agent_absolute_timestamp)
 
             # If no agents are left in this snapshot, skip it
             if not processed_features:
@@ -129,6 +135,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             velocity += (self.max_cav - len(velocity)) * [0.]
             time_delay += (self.max_cav - len(time_delay)) * [0.]  # Also pad delay
             infra += (self.max_cav - len(infra)) * [0.]
+            agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0]  # Use 0 as padding value
 
             spatial_correction_matrix = np.stack(spatial_correction_matrix)
             padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
@@ -147,7 +154,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                 'time_delay': time_delay,  # This is now correctly included
                 'infra': infra,
                 'spatial_correction_matrix': spatial_correction_matrix,
-                'pairwise_t_matrix': pairwise_t_matrix
+                'pairwise_t_matrix': pairwise_t_matrix,
+                'agent_timestamps': agent_timestamps
             })
             processed_data_list.append(processed_data_dict)
 
