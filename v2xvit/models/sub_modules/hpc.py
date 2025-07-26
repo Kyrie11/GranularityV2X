@@ -283,7 +283,7 @@ class ContextExtrapolator(nn.Module):
                ) -> Dict[str, torch.Tensor]:
 
         N,_,H,W = s_ctx.shape
-        device = s_ctx.shape
+        device = s_ctx.device
         delay_tensor = torch.tensor(delays_ms, device=device).unsqueeze(1)
 
         # --- 1. 延迟感知的上下文融合 ---
