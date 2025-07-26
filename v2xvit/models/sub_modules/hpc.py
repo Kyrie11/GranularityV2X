@@ -210,7 +210,7 @@ class HierarchicalPredictionHead(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, fused_context: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, fused_context):
         x = self.decoder_trunk(fused_context)
 
         return {
