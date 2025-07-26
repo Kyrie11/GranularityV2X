@@ -327,7 +327,7 @@ class ContextExtrapolator(nn.Module):
         return F.grid_sample(feature_map, new_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
 
 
-def forward(self,
+    def forward(self,
                 s_ctx: torch.Tensor,
                 l_ctx: torch.Tensor,
                 delayed_g1_frame: torch.Tensor,
