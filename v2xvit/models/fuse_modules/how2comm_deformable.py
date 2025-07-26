@@ -94,7 +94,7 @@ class How2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    def delay_compensation(self, short_his, long_his, delay):
+    def delay_compensation(self, g1_data, g2_data, g3_data, short_his, long_his, delay):
         short_his_g1, short_his_g2, short_his_g3 = short_his
         long_his_g1, long_his_g2, long_his_g3 = long_his
 
@@ -163,6 +163,7 @@ class How2comm(nn.Module):
         cos_sim3 = F.cosine_similarity(predicted_g3, g3_data, dim=1)
         cos_sim3 = (1 - cos_sim3).mean()
         delay_loss = cos_sim1 + cos_sim2 + cos_sim3
+        return predicted_g1, predicted_g2, predicted_g3, delay_loss
 
     '''
         g1_data: vox-level data
@@ -186,13 +187,12 @@ class How2comm(nn.Module):
 
         delay_loss = torch.tensor(0.0, device=device)
         if short_his and long_his:
-            predicted_g1, predicted_g2, predicted_g3, delay_loss = self.delay_compensation(short_his, long_his, delay)
+            predicted_g1, predicted_g2, predicted_g3, delay_loss = self.delay_compensation(g1_data, g2_data, g3_data,
+                                                                            short_his, long_his, delay)
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
             g1_data = predicted_g1.cl
             g2_data = predicted_g2
             g3_data = predicted_g3
-
-
 
         if self.multi_scale:
             ups = []
