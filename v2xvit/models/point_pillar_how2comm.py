@@ -110,6 +110,7 @@ class PointPillarHow2comm(nn.Module):
         current_data_dict = current_data['ego']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
+        print(f"有{record_len}辆车")
         # g1_data = self.regroup(g1_data, record_len)[0]
         # g2_data = self.regroup(g2_data, record_len)[0]
         # g3_data = self.regroup(g3_data, record_len)[0]
