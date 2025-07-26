@@ -317,12 +317,11 @@ class ContextExtrapolator(nn.Module):
         identity_grid = torch.stack((grid_x, grid_y), 2).float()
         self.register_buffer('identity_grid', identity_grid.unsqueeze(0), persistent=False)
 
-    def warp(self, feature_map, motion_field):
+    def _warp(self, feature_map: torch.Tensor, motion_field: torch.Tensor) -> torch.Tensor:
         N, _, H, W = feature_map.shape
-        norm_identity_grid = self.identity_grid * 2.0 / torch.tensor([W - 1, H - 1],
-                                                                     device=self.identity_grid.device) - 1.0
+        norm_identity_grid = self.identity_grid * 2.0 / torch.tensor([W-1, H-1], device=self.identity_grid.device) - 1.0
         motion_field_transposed = motion_field.permute(0, 2, 3, 1)
-        norm_motion_field = motion_field_transposed * 2.0 / torch.tensor([W - 1, H - 1], device=motion_field.device)
+        norm_motion_field = motion_field_transposed * 2.0 / torch.tensor([W-1, H-1], device=motion_field.device)
         new_grid = norm_identity_grid + norm_motion_field
         return F.grid_sample(feature_map, new_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
 
