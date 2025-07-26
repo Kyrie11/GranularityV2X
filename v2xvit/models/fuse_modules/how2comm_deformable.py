@@ -70,20 +70,21 @@ class How2comm(nn.Module):
         result_map_channels = 8
         total_input_channels=physical_info_channels + bev_feature_channels + result_map_channels
         feature_size = (100, 352)
+        g1_out = 16
+        g2_out = 256
+        g3_out = 16
+        unified_channel = 256
         #时延预测模块
         self.context_extrapolator = ContextExtrapolator(s_ctx_channels=s_ctx_channels, l_ctx_dim=l_ctx_dim, fusion_dim=128,
                                                         bev_feature_channels=bev_feature_channels, physical_info_channels=physical_info_channels,
                                                         result_map_channels=result_map_channels, feature_size=feature_size)
 
-        self.temporal_context_encoder = TemporalContextEncoder(total_input_channels=total_input_channels,
+        self.temporal_context_encoder = TemporalContextEncoder(total_input_channels=unified_channel,
                                                                s_ctx_channels=s_ctx_channels,
                                                                l_ctx_dim=l_ctx_dim,
                                                                feature_size=feature_size)
 
-        g1_out = 16
-        g2_out = 256
-        g3_out = 16
-        unified_channel = 256
+
         self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8, g1_out=g1_out,
                                                      g2_out=g2_out, g3_out=g3_out, unified_channel=unified_channel)
 
