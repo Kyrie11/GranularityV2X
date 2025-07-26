@@ -80,7 +80,11 @@ class How2comm(nn.Module):
                                                                l_ctx_dim=l_ctx_dim,
                                                                feature_size=feature_size)
 
-        self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8)
+        g1_out = 16
+        g2_out = 256
+        g3_out = 16
+        unified_channel = 256
+        self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8, g1_out=g1_out, g2_out=g2_out, g3_out=g3_out, unified_channel=unified_channel)
 
         self.distillation_loss = DistillationLoss()
 
