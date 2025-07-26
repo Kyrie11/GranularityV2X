@@ -351,6 +351,7 @@ class ContextExtrapolator(nn.Module):
 
         # 动态门控融合
         fused_context_map = (1 - g) * s_ctx_processed + g * l_ctx_processed
+        print("融合历史上下文的shape是：", fused_context_map.shape)
 
         # --- 2. 基于融合上下文进行预测 ---
         params = self.prediction_head(fused_context_map)

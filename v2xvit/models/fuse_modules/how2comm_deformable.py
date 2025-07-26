@@ -213,109 +213,22 @@ class How2comm(nn.Module):
             g2_data[1:] = predicted_g2[1:]
             g3_data[1:] = predicted_g3[1:]
 
+        #坐标对齐
+        t_matrix = pairwise_t_matrix[0][:record_len, :record_len, :, :]
+        H, W = g1_data.shape[2:]
+        g1_data = warp_affine_simple(g1_data, t_matrix[0, :, :, :], (H,W))
+        g2_data = warp_affine_simple(g2_data, t_matrix[0, :, :, :], (H,W))
+        g3_data = warp_affine_simple(g3_data, t_matrix[0, :, :, :], (H,W))
+
         unified_bev_maps = self.unified_bev_encoder(g1_data, g2_data, g3_data)
         if self.communication:
             ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume = self.communication_net(g1_data, g2_data,
                                                                                                g3_data, unified_bev_maps)
             commu_loss = self.distillation_loss(ego_demand, unified_bev_maps, sparse_g1, sparse_g2, sparse_g3)
 
-
-        for b in range(B):
-            N = record_len[b]
-            t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
+            print("sparse_g1.shape=", sparse_g1.shape)
 
 
-        if short_his and long_his:
-            # feat_final, offset_loss = self.how2comm(fused_bev, short_history, long_history, record_len, backbone, heads)
-            comp_g1, comp_g2, comp_g3, compensation_params = self.latency_compensator(short_his, long_his, delay, record_len)
-            delay_g1 = short_his[0][0]
-            delay_g2 = short_his[1][0]
-            delay_g3 = short_his[2][0]
-            delay_loss = self.hierarchical_delay_loss(compensation_params, g1_data, g2_data, g3_data, delay_g1, delay_g2, delay_g3, record_len)
-
-            g1_data = comp_g1.clone().detach()
-            g2_data = comp_g2.clone().detach()
-            g3_data = comp_g3.clone().detach()
-        else:
-            g1_data = curr_g1_data
-            g2_data = curr_g2_data
-            g3_data = curr_g3_data
-            delay_loss = 0
-        print("第二次检查feat_bev.shape=", g2_data.shape)
-        #把增强后的ego特征放入
-        # 对ego的帧进行增强
-        # feat_bev_copy = self.get_enhanced_feature(feat_bev_copy, his_feat[1:-1], record_len)  # 取第0到第3帧作为历史
-        # print("第三次检查feat_bev.shape=", feat_bev_copy.shape)
-
-        fused_feat_list = []
-        fused_feat = torch.tensor(0).to(device)
-        commu_volume = 0
-        commu_loss = torch.tensor(0).to(device)
-        #先不考虑multi_scale
-        if self.communication:
-            batch_temp_g1_data = self.regroup(g1_data, record_len)
-            batch_temp_g2_data = self.regroup(g2_data, record_len)
-            batch_temp_g3_data = self.regroup(g3_data, record_len)
-
-            temp_g1_list, temp_g2_list, temp_g3_list = [], [], []
-            for b in range(B):
-                N = record_len[b]
-                t_matrix = pairwise_t_matrix[b][:N, :N, :, :]
-
-                temp_g1_data = batch_temp_g1_data[b]
-                print("temp_g1_data.shape=", temp_g1_data.shape)
-                print("t_matrix.shape=", t_matrix.shape)
-                C,H,W = temp_g1_data.shape[1:]
-                neighbor_g1_data = warp_affine_simple(temp_g1_data, t_matrix[0,:,:,:], (H,W))
-                temp_g1_list.append(neighbor_g1_data)
-
-                temp_g2_data = batch_temp_g2_data[b]
-                neighbor_g2_data = warp_affine_simple(temp_g2_data, t_matrix[0,:,:,:], (H,W))
-                temp_g2_list.append(neighbor_g2_data)
-
-                temp_g3_data = batch_temp_g3_data[b]
-                neighbor_g3_data = warp_affine_simple(temp_g3_data, t_matrix[0,:,:,:], (H,W))
-                temp_g3_list.append(neighbor_g3_data)
-            # g1_data = torch.cat(temp_g1_list, dim=0)
-            # g2_data = torch.cat(temp_g2_list, dim=0)
-            # g3_data = torch.cat(temp_g3_list, dim=0)
-
-            print("第四次检查feat_bev.shape=", g1_data.shape)
-            #稀疏多粒度数据传输
-            if self.communication_flag:
-                g1_data, g2_data, g3_data, commu_loss, commu_volume = self.communication_net(temp_g1_list, temp_g2_list, temp_g3_list)
-                # sparse_vox = all_agents_sparse_transmitted_data[:, 0:self.c_d, :, :]
-                # sparse_feat = all_agents_sparse_transmitted_data[:, self.c_d:self.c_d + self.c_f, :, :]
-                # sparse_det = all_agents_sparse_transmitted_data[:, self.cd + self.c_f:, :, :]
-                # vox_bev = F.interpolate(sparse_vox, scale_factor=1, mode="bilinear", align_corners=False)
-                # vox_bev = self.channel_fuse(vox_bev)
-                # feat_bev = F.interpolate(sparse_feat, scale_factor=1, mode="bilinear", align_corners=False)
-                # feat_bev = self.channel_fuse(feat_bev)
-                # det_bev = F.interpolate(sparse_det, scale_factor=1, mode="bilinear", align_corners=False)
-                # det_bev = self.channel_fuse(det_bev)
-            else:
-                commu_volume = torch.tensor(0).to(device)
-                commu_loss = torch.zeros(0).to(device)
-            print("第五次检查feat_bev.shape=", g1_data.shape)
-
-            batch_node_g1 = self.regroup(g1_data, record_len)
-            batch_node_g2 = self.regroup(g2_data, record_len)
-            batch_node_g3 = self.regroup(g3_data, record_len)
-
-            #初始化一个全零的隐藏状态 (记忆)
-            if self.hidden_state is None or self.hidden_state.shape[0] != B:
-                self.hidden_state = torch.zeros(B, self.c_temporal, H, W, device=device)
-
-            for b in range(B):
-                node_g1 = batch_node_g1[b]
-                node_g2 = batch_node_g2[b]
-                node_g3 = batch_node_g3[b]
-                node_hidden_state = self.hidden_state[b:b+1]
-                fused_feat = self.gem_fusion(node_g1, node_g2, node_g3, node_hidden_state)
-                node_hidden_state = self.main_temporal_gru(fused_feat, node_hidden_state)
-                fused_feat_list.append(fused_feat)
-                with torch.no_grad():
-                    self.hidden_state[b:b+1] = node_hidden_state.detach()
             fused_feat = torch.cat(fused_feat_list, dim=0)
 
         return fused_feat, commu_volume, delay_loss, commu_loss
