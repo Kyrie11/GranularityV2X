@@ -58,7 +58,8 @@ class How2comm(nn.Module):
         self.downsample_rate = args['downsample_rate']
         self.async_flag = False
         self.discrete_ratio = args['voxel_size'][0]
-        self.long_intervals = args['train_params']['lsh']['p']
+        # self.long_intervals = args['train_params']['lsh']['p']
+        self.long_intervals = 3
         # 通信模块
         self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
 
