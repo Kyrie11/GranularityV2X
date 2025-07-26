@@ -146,13 +146,15 @@ class How2comm(nn.Module):
         delayed_g2_frame = short_his_g2[0]  # 要延迟补偿的帧
         delayed_g3_frame = short_his_g3[0]  # 要延迟补偿的帧
         # =================得到预测结果，包含预测的g1、g2、g3===============
+        delay = delay * 100
+        print("延迟时间是:", delay)
         predictions = self.context_extrapolator(
             s_ctx=encoded_contexts['short_term_context'],
             l_ctx=encoded_contexts['long_term_context'],
             delayed_g1_frame=delayed_g1_frame,
             delayed_g2_frame=delayed_g2_frame,
             delayed_g3_frame=delayed_g3_frame,
-            delay_ms=delay
+            delays_ms=delay
         )
 
         predicted_g1 = predictions['predicted_g1']
