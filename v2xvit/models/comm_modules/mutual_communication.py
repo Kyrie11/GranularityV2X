@@ -166,8 +166,8 @@ class AdvancedCommunication(nn.Module):
         ego_g3 = g3_data[0:1]
 
         collab_g1 = g1_data[1:]
-        collab_g2 = g1_data[2:]
-        collab_g3 = g1_data[3:]
+        collab_g2 = g2_data[2:]
+        collab_g3 = g3_data[3:]
 
         collab_sparse_g1 = collab_g1 * sparse_maps[:, 0:1, :, :]
         collab_sparse_g2 = collab_g2 * sparse_maps[:, 1:2, :, :]
