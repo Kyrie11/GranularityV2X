@@ -188,6 +188,8 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
+                print(f"len(short_his_data)={len(short_his_data)}")
+                print(f"len(long_his_data)={len(long_his_data)}")
                 ouput_dict = model(current_data, short_his_data, long_his_data)
                 final_loss = criterion(ouput_dict,
                                        current_data['ego']['label_dict'])
