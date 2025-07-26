@@ -178,7 +178,7 @@ class HierarchicalPredictionHead(nn.Module):
     - S: 置信度调制图。
     """
 
-    def __init__(self, input_channels, output_shape:tuple[int, int]):
+    def __init__(self, input_channels, output_shape):
         """
         Args:
             feature_dim (int): 输入的融合特征维度。
