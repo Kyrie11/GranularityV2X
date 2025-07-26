@@ -189,10 +189,11 @@ class How2comm(nn.Module):
         if short_his and long_his:
             predicted_g1, predicted_g2, predicted_g3, delay_loss = self.delay_compensation(g1_data, g2_data, g3_data,
                                                                             short_his, long_his, delay)
+            print(f"predicted_g1.shape={predicted_g1.shape}")
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
-            g1_data = predicted_g1.cl
-            g2_data = predicted_g2
-            g3_data = predicted_g3
+            g1_data[1:] = predicted_g1[1:]
+            g2_data[1:] = predicted_g2[1:]
+            g3_data[1:] = predicted_g3[1:]
 
         if self.multi_scale:
             ups = []
