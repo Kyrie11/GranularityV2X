@@ -98,6 +98,9 @@ class PointPillarHow2comm(nn.Module):
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
+    # g2的shape是[N,C,H,W]
+    # g1的shape是[N,C',H/2,W/2]
+    # 我们只加载一个batch数据，所以不再使用record_len
     def forward(self, current_data, short_term, long_term):
         #===========current时刻的数据================
         #返回的是三个元素个数为1的列表
@@ -108,29 +111,18 @@ class PointPillarHow2comm(nn.Module):
         g3_data = g3_data[0]
         current_data_dict = current_data['ego']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
-        record_len = current_data_dict['record_len']
+        print(f"pairwise_t_matrix.shape={pairwise_t_matrix.shape}")
+        record_len = current_data_dict['record_len'][0] #只有一个batch
         print(f"g1_data.shape={g1_data.shape}")
         print(f"g2_data.shape={g2_data.shape}")
         print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
-        delay = short_term[0]['ego']['time_delay']
+        delay = short_term[0]['ego']['time_delay'][record_len]
         print(f"delay={delay}")
         print(f"delay.shape={delay.shape}")
 
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
-        print(f"short_his_g1的长度为{len(short_his_g1)}")
-        print(f"short_his_g1[0].shape={short_his_g1[0].shape}")
-        short_his_g1 = self.regroup(short_his_g1, record_len)
-        short_his_g2 = self.regroup(short_his_g2, record_len)
-        short_his_g3 = self.regroup(short_his_g3, record_len)
-        print(f"short_his_g1[0].shape={short_his_g1[0].shape}")
-        print(f"short_his_g2[0].shape={short_his_g2[0].shape}")
-        print(f"short_his_g2[0].shape={short_his_g2[0].shape}")
-
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
-        long_his_g1 = self.regroup(long_his_g1, record_len)
-        long_his_g2 = self.regroup(long_his_g2, record_len)
-        long_his_g3 = self.regroup(long_his_g3, record_len)
         print(f"long_his_g1[0].shape={long_his_g1[0].shape}")
         print(f"long_his_g2[0].shape={long_his_g2[0].shape}")
         print(f"long_his_g3[0].shape={long_his_g3[0].shape}")
@@ -154,6 +146,7 @@ class PointPillarHow2comm(nn.Module):
         return output_dict
         return None
 
+
     def get_histroy_granularity(self, history):
         his_g1, his_g2, his_g3 = [], [], []
         matrix_list = []
@@ -174,7 +167,6 @@ class PointPillarHow2comm(nn.Module):
             batch_dict = self.scatter(batch_dict)
             batch_dict = self.backbone(batch_dict)
             spatial_features = batch_dict['spatial_features']
-            print(f"spatial_features.shape={spatial_features.shape}")
             spatial_features_2d = batch_dict['spatial_features_2d']
             # downsample feature to reduce memory
             if self.shrink_flag:
@@ -191,7 +183,6 @@ class PointPillarHow2comm(nn.Module):
             his_g2.append(spatial_features)
             matrix_list.append(pairwise_t_matrix)
             g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
-            print("vox_bev.shape=", g1.shape)
             his_g1.append(g1)
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
