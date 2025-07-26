@@ -99,6 +99,8 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, current_data, short_term, long_term):
+        print(f"how2comm内部短期历史长度为{len(short_term)}")
+        print(f"how2comm内部长期历史长度为{len(long_term)}")
         #===========current时刻的数据================
         print(len(current_data))
         #返回的是三个元素个数为1的列表
