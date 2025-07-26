@@ -187,7 +187,6 @@ class AdvancedCommunication(nn.Module):
         :param unified_list: 三个粒度数据通道拼接再经过1x1卷积
         :return:
         '''
-        device = g1.device()
         commu_volume = 0
 
         num_agents, c_g1, H, W = g1.shape
