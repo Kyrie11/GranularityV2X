@@ -122,8 +122,8 @@ class TemporalContextEncoder(nn.Module):
         feature_flat_dim = total_input_channels * feature_size[0] * feature_size[1] #特征展平
 
         self.short_term_encoder = ShortTermEncoder(
-            input_channels=total_input_channels,
-            output_channels=s_ctx_channels
+            input_dim=total_input_channels,
+            output_dim=s_ctx_channels
         )
 
         self.long_term_encoder = LongTermEncoder(
