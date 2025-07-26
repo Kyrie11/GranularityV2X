@@ -99,26 +99,24 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, current_data, short_term, long_term):
-        print(f"how2comm内部短期历史长度为{len(short_term)}")
-        print(f"how2comm内部长期历史长度为{len(long_term)}")
         #===========current时刻的数据================
         print(len(current_data))
         #返回的是三个元素个数为1的列表
-        # g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
-        #从列表中分离
-        # g1_data = g1_data[0]
-        # g2_data = g2_data[0]
-        # g3_data = g3_data[0]
+        g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
+        # 从列表中分离
+        g1_data = g1_data[0]
+        g2_data = g2_data[0]
+        g3_data = g3_data[0]
         current_data_dict = current_data['ego']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
         print(f"有{record_len}辆车")
-        # g1_data = self.regroup(g1_data, record_len)[0]
-        # g2_data = self.regroup(g2_data, record_len)[0]
-        # g3_data = self.regroup(g3_data, record_len)[0]
-        # print(f"g1_data.shape={g1_data.shape}")
-        # print(f"g2_data.shape={g2_data.shape}")
-        # print(f"g3_data.shape={g3_data.shape}")
+        g1_data = self.regroup(g1_data, record_len)[0]
+        g2_data = self.regroup(g2_data, record_len)[0]
+        g3_data = self.regroup(g3_data, record_len)[0]
+        print(f"g1_data.shape={g1_data.shape}")
+        print(f"g2_data.shape={g2_data.shape}")
+        print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
         delay = short_term[0]['ego']['time_delay']
         print(f"delay={delay}")
@@ -199,6 +197,7 @@ class PointPillarHow2comm(nn.Module):
             matrix_list.append(pairwise_t_matrix)
             g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
             print("vox_bev.shape=", g1.shape)
+            his_g1.append(g1)
             psm = self.cls_head(spatial_features_2d)
             rm = self.reg_head(spatial_features_2d)
             g3 = self.get_g3_bev(psm, rm)
