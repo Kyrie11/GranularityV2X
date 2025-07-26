@@ -115,8 +115,8 @@ class How2comm(nn.Module):
         short_his_g2_stacked = short_his_g2_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
         short_his_g3_stacked = short_his_g3_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
 
-        short_his_unified_bev = self.unified_bev_encoder(short_his_g1, short_his_g2,
-                                                         short_his_g3)  # Output: [N * T, C_unified, H, W]
+        short_his_unified_bev = self.unified_bev_encoder(short_his_g1_stacked, short_his_g2_stacked,
+                                                         short_his_g3_stacked)  # Output: [N * T, C_unified, H, W]
         short_his_unified_bev = short_his_unified_bev.view(N, T_short, -1, H,
                                                            W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
 
@@ -131,8 +131,8 @@ class How2comm(nn.Module):
         long_his_g2_stacked = long_his_g2_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
         long_his_g3_stacked = long_his_g3_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
 
-        long_his_unified_bev = self.unified_bev_encoder(long_his_g1, long_his_g2,
-                                                        long_his_g3)  # Output: [N * T, C_unified, H, W]
+        long_his_unified_bev = self.unified_bev_encoder(long_his_g1_stacked, long_his_g2_stacked,
+                                                        long_his_g3_stacked)  # Output: [N * T, C_unified, H, W]
         long_his_unified_bev = long_his_unified_bev.view(N, T_long, -1, H,
                                                          W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
 
