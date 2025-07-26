@@ -99,21 +99,45 @@ class PointPillarHow2comm(nn.Module):
         return split_x
 
     def forward(self, current_data, short_term, long_term):
-        record = current_data['ego']['record_len']
-        print(f"record: {record}")
+        #===========current时刻的数据================
+        #返回的是三个元素个数为1的列表
+        g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
+        #从列表中分离
+        g1_data = g1_data[0]
+        g2_data = g2_data[0]
+        g3_data = g3_data[0]
         current_data_dict = current_data['ego']
-        delay = short_term[0]['ego']['time_delay']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
+        g1_data = self.regroup(g1_data, record_len)[0]
+        g2_data = self.regroup(g2_data, record_len)[0]
+        g3_data = self.regroup(g3_data, record_len)[0]
+        print(f"g1_data.shape={g1_data.shape}")
+        print(f"g2_data.shape={g2_data.shape}")
+        print(f"g3_data.shape={g3_data.shape}")
+        #所有agent的延迟时间
+        delay = short_term[0]['ego']['time_delay']
+        print(f"delay={delay}")
+        print(f"delay.shape={delay.shape}")
+
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
+        short_his_g1 = self.regroup(short_his_g1, record_len)
+        short_his_g2 = self.regroup(short_his_g2, record_len)
+        short_his_g3 = self.regroup(short_his_g3, record_len)
+        print(f"short_his_g1[0].shape={short_his_g1[0].shape}")
+        print(f"short_his_g2[0].shape={short_his_g2[0].shape}")
+        print(f"short_his_g2[0].shape={short_his_g2[0].shape}")
 
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
+        long_his_g1 = self.regroup(long_his_g1, record_len)
+        long_his_g2 = self.regroup(long_his_g2, record_len)
+        long_his_g3 = self.regroup(long_his_g3, record_len)
+        print(f"long_his_g1[0].shape={long_his_g1[0].shape}")
+        print(f"long_his_g2[0].shape={long_his_g2[0].shape}")
+        print(f"long_his_g3[0].shape={long_his_g3[0].shape}")
+
         short_his = [short_his_g1, short_his_g2, short_his_g3]
         long_his = [long_his_g1, long_his_g2, long_his_g3]
-
-        g1_data = short_his_g1[0]
-        g2_data = short_his_g2[0]
-        g3_data = short_his_g3[0]
 
         if len(long_term) <= 1:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(

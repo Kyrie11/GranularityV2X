@@ -10,12 +10,44 @@ from icecream import ic
 
 from v2xvit.models.comm_modules.mutual_communication import AdvancedCommunication
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from v2xvit.models.sub_modules.mixed_feature_flow import ContextFusionMotionPredictor
-from v2xvit.loss.flow_loss import CompensationLoss
-from v2xvit.models.fuse_modules.multi_granularity_fusion import AgentSelfEnhancement, MultiGranularityFusionNet
-from v2xvit.models.fuse_modules.gem_fusion import GEM_Fusion, ConvGRUCell
-from v2xvit.models.sub_modules.delay_compensation import LatencyCompensator
-from v2xvit.loss.hierarchical_delay_loss import HierarchicalDelayLoss
+from v2xvit.models.sub_modules.hpc import ContextExtrapolator, TemporalContextEncoder
+from v2xvit.loss.distillation_loss import DistillationLoss
+
+class GranularityEncoder(nn.Module):
+    def __init__(self, input_channels, output_channels):
+        super().__init__()
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(input_channels, output_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(output_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(output_channels, output_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(output_channels),
+            nn.ReLU(inplace=True)
+        )
+    def forward(self, x):
+        return self.conv_block(x)
+
+class UnifiedBevEncoder(nn.Module):
+    def __init__(self,g1_channels, g2_channels, g3_channels, g1_out, g2_out, g3_out, unified_channel):
+        super().__init__()
+
+        self.g1_encoder = GranularityEncoder(input_channels=g1_channels, output_channels=g1_out)
+        self.g2_encoder = GranularityEncoder(input_channels=g2_channels, output_channels=g2_out)
+        self.g3_encoder = GranularityEncoder(input_channels=g3_channels, output_channels=g3_out)
+
+        total_output = g1_out + g2_out + g3_out
+        self.fusion_conv = nn.Conv2d(total_output, unified_channel, kernel_size=1)  # 把三个粒度数据合并后再1x1卷积
+
+    def forward(self, g1_data, g2_data, g3_data):
+        ''''
+        处理一帧的三粒度数据
+        '''
+        feature_g1 = self.g1_encoder(g1_data)
+        feature_g2 = self.g2_encoder(g2_data)
+        feature_g3 = self.g3_encoder(g3_data)
+        concatenated_features = torch.cat([feature_g1, feature_g2, feature_g3], dim=1)
+        unified_feature = self.fusion_conv(concatenated_features)
+        return unified_feature
 
 
 class How2comm(nn.Module):
@@ -26,62 +58,105 @@ class How2comm(nn.Module):
         self.downsample_rate = args['downsample_rate']
         self.async_flag = False
         self.discrete_ratio = args['voxel_size'][0]
-
-        #时延补偿模块
-        self.mgdc_bev_compensator = ContextFusionMotionPredictor(args['mgdc_bev_args'])
-        #时延补偿损失
-        self.compensation_criterion = CompensationLoss(args['mgdc_bev_args'])
-        #ego增强模块
-        self.ego_enhance_model = AgentSelfEnhancement(d_model=64, num_history_frames=3, nhead_transformer=8, num_transformer_layers=2)
-        #最终融合模块
-        self.granularity_fusion = MultiGranularityFusionNet(args['granularity_trans'])
+        self.long_intervals = args['train_params']['lsh']['p']
         # 通信模块
         self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
 
-        self.c_temporal = 128
-        self.gem_fusion = GEM_Fusion(c_g1=8, c_g2=64, c_g3=8, c_temporal=self.c_temporal, c_fusion=256)
+        s_ctx_channels = 32
+        l_ctx_dim = 256
+        physical_info_channels = 8
+        bev_feature_channels = 256
+        result_map_channels = 8
+        total_input_channels=physical_info_channels + bev_feature_channels + result_map_channels
+        feature_size = (100, 352)
+        #时延预测模块
+        self.context_extrapolator = ContextExtrapolator(s_ctx_channels=s_ctx_channels, l_ctx_dim=l_ctx_dim, fusion_dim=128,
+                                                        bev_feature_channels=bev_feature_channels, physical_info_channels=physical_info_channels,
+                                                        result_map_channels=result_map_channels, feature_size=feature_size)
 
-        self.main_temporal_gru = ConvGRUCell(input_dim=256, hidden_dim=self.c_temporal, kernel_size=3)
+        self.temporal_context_encoder = TemporalContextEncoder(total_input_channels=total_input_channels,
+                                                               s_ctx_channels=s_ctx_channels,
+                                                               l_ctx_dim=l_ctx_dim,
+                                                               feature_size=feature_size)
 
-        self.hidden_state = None
+        self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8)
 
-        self.latency_compensator = LatencyCompensator(c_g1=8, c_g2=64, c_g3=8, c_motion=32, c_fuse=128)
-
-        self.hierarchical_delay_loss = HierarchicalDelayLoss()
-
-    def reset_hidden_state(self):
-        self.hidden_state = None
-
-    def detach_hidden_state(self):
-        if self.hidden_state is not None:
-            self.hidden_state = self.hidden_state.detach()
+        self.distillation_loss = DistillationLoss()
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
 
-    #对ego-agent在current时刻的帧进行增强，对neighbor-agent在delay时刻的帧进行增强
-    #我先实现对ego-agent的增强
-    def get_enhanced_feature(self, curr_bev, his_bev, record_len):
-        ego_history_list = []
-        batch_size = len(record_len)
-        curr_bev_batch = self.regroup(curr_bev, record_len)
-        curr_ego_features = torch.stack([sample_bev[0] for sample_bev in curr_bev_batch], dim=0)
-        ego_history_list.append(curr_ego_features)
+    def delay_compensation(self, short_his, long_his, delay):
+        short_his_g1, short_his_g2, short_his_g3 = short_his
+        long_his_g1, long_his_g2, long_his_g3 = long_his
 
-        for his_bev_t in his_bev:
-            his_bev_t_batch = self.regroup(his_bev_t, record_len)
-            his_ego_features_t = torch.stack([sample_bev[0] for sample_bev in his_bev_t_batch], dim=0)
-            ego_history_list.append(his_ego_features_t)
+        # =======短期历史数据编码=======
+        short_his_g1_stacked = torch.stack(short_his_g1, dim=1)  # [N,T,C,H,W]
+        short_his_g2_stacked = torch.stack(short_his_g2, dim=1)
+        short_his_g3_stacked = torch.stack(short_his_g3, dim=1)
 
-        enhanced_features, occlusion_map, abnormal_map = self.ego_enhance_model(ego_history_list)
+        N, T_short, _, H, W = short_his_g1_stacked.shape
 
-        updated_curr_bev = curr_bev.clone()
-        ego_indices = [0] + torch.cumsum(torch.tensor(record_len[:-1]), dim=0).tolist()
-        for i in range(batch_size):
-            curr_bev_batch[i][0] = enhanced_features[i]
-        return torch.cat(curr_bev_batch, dim=0)
+        short_his_g1_stacked = short_his_g1_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
+        short_his_g2_stacked = short_his_g2_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
+        short_his_g3_stacked = short_his_g3_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
+
+        short_his_unified_bev = self.unified_bev_encoder(short_his_g1, short_his_g2,
+                                                         short_his_g3)  # Output: [N * T, C_unified, H, W]
+        short_his_unified_bev = short_his_unified_bev.view(N, T_short, -1, H,
+                                                           W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
+
+        # =======长期历史数据编码=======
+        long_his_g1_stacked = torch.stack(long_his_g1, dim=1)  # [N,T,C,H,W]
+        long_his_g2_stacked = torch.stack(long_his_g2, dim=1)
+        long_his_g3_stacked = torch.stack(long_his_g3, dim=1)
+
+        T_long = long_his_g1_stacked.shape[1]
+
+        long_his_g1_stacked = long_his_g1_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
+        long_his_g2_stacked = long_his_g2_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
+        long_his_g3_stacked = long_his_g3_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
+
+        long_his_unified_bev = self.unified_bev_encoder(long_his_g1, long_his_g2,
+                                                        long_his_g3)  # Output: [N * T, C_unified, H, W]
+        long_his_unified_bev = long_his_unified_bev.view(N, T_long, -1, H,
+                                                         W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
+
+        long_time_gaps = [i * -100 * self.long_intervals for i in range(T_long)]  # 时间回溯gap,譬如[0,-300,-600,-900]
+        # 编码历史上下文信息
+        encoded_contexts = self.temporal_context_encoder(short_his_unified_bev, long_his_unified_bev, long_time_gaps)
+
+        delayed_g1_frame = short_his_g1[0]  # 要延迟补偿的帧
+        delayed_g2_frame = short_his_g2[0]  # 要延迟补偿的帧
+        delayed_g3_frame = short_his_g3[0]  # 要延迟补偿的帧
+        # =================得到预测结果，包含预测的g1、g2、g3===============
+        predictions = self.context_extrapolator(
+            s_ctx=encoded_contexts['short_term_context'],
+            l_ctx=encoded_contexts['long_term_context'],
+            delayed_g1_frame=delayed_g1_frame,
+            delayed_g2_frame=delayed_g2_frame,
+            delayed_g3_frame=delayed_g3_frame,
+            delay_ms=delay
+        )
+
+        predicted_g1 = predictions['predicted_g1']
+        predicted_g2 = predictions['predicted_g2']
+        predicted_g3 = predictions['predicted_g3']
+
+        # 沿着通道维度(dim=1)计算余弦相似度。
+        # 输出的 cos_sim 的形状为 [N, H, W]
+        # 将余弦相似度转换为损失。
+        # 损失值范围为 [0, 2]，目标是最小化到 0。
+        # 我们计算批次中所有像素位置损失的平均值。
+        cos_sim1 = F.cosine_similarity(predicted_g1, g1_data, dim=1)
+        cos_sim1 = (1 - cos_sim1).mean()
+        cos_sim2 = F.cosine_similarity(predicted_g2, g2_data, dim=1)
+        cos_sim2 = (1 - cos_sim2).mean()
+        cos_sim3 = F.cosine_similarity(predicted_g3, g3_data, dim=1)
+        cos_sim3 = (1 - cos_sim3).mean()
+        delay_loss = cos_sim1 + cos_sim2 + cos_sim3
 
     '''
         g1_data: vox-level data
@@ -102,10 +177,16 @@ class How2comm(nn.Module):
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
-        short_his_g1, short_his_g2, short_his_g3 = short_his
-        glong_his_g1, long_his_g2, long_his_g3 = long_his
 
-        #if short_his and long_his:
+        delay_loss = torch.tensor(0.0, device=device)
+        if short_his and long_his:
+            predicted_g1, predicted_g2, predicted_g3, delay_loss = self.delay_compensation(short_his, long_his, delay)
+            # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
+            g1_data = predicted_g1.cl
+            g2_data = predicted_g2
+            g3_data = predicted_g3
+
+
 
         if self.multi_scale:
             ups = []
