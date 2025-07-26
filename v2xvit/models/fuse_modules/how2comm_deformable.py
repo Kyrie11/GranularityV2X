@@ -10,7 +10,7 @@ from icecream import ic
 
 from v2xvit.models.comm_modules.mutual_communication import AdvancedCommunication
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from v2xvit.models.sub_modules.hpc import ContextExtrapolator, TemporalContextEncoder
+from v2xvit.models.sub_modules.hpc import ContextExtrapolator, AgentEncoder
 from v2xvit.loss.distillation_loss import DistillationLoss
 
 class GranularityEncoder(nn.Module):
@@ -79,7 +79,7 @@ class How2comm(nn.Module):
                                                         bev_feature_channels=bev_feature_channels, physical_info_channels=physical_info_channels,
                                                         result_map_channels=result_map_channels, feature_size=feature_size)
 
-        self.temporal_context_encoder = TemporalContextEncoder(total_input_channels=unified_channel,
+        self.temporal_context_encoder = AgentEncoder(total_input_channels=unified_channel,
                                                                s_ctx_channels=s_ctx_channels,
                                                                l_ctx_dim=l_ctx_dim,
                                                                feature_size=feature_size)
