@@ -220,13 +220,29 @@ class HierarchicalPredictionHead(nn.Module):
         )
 
     def forward(self, fused_context):
-        x = self.decoder_trunk(fused_context)
+        print("融合后的历史上下文的shape是：", fused_context.shape)
+
+        N = fused_context.shape[0]
+        # 通过共享主干
+        intermediate_feat = self.decoder_trunk(fused_context)
+
+        def _reshape(flat_tensor, channels):
+            return flat_tensor.view(N, channels, *self.output_shape)
+
+        # 从主干特征并行生成所有头
+        base_motion = _reshape(self.head_v(intermediate_feat), 2)
+        feature_residual = _reshape(self.head_f(intermediate_feat), 2)
+        result_residual = _reshape(self.head_r(intermediate_feat), 2)
+
+        # head_s 包含Sigmoid，所以直接用它
+        confidence_scaler_flat = self.head_s(intermediate_feat)
+        confidence_scaler = _reshape(confidence_scaler_flat, 1)
 
         return {
-            "base_motion_field": self.head_v(x),
-            "feature_residual_field": self.head_f(x),
-            "result_residual_field": self.head_r(x),
-            "confidence_scaler": self.head_s(x)
+            "base_motion_field": base_motion,          # O_v
+            "feature_residual_field": feature_residual,  # O_f (待施加稀疏损失)
+            "result_residual_field": result_residual,    # O_r (待施加稀疏损失)
+            "confidence_scaler": confidence_scaler       # S
         }
 
 #==================================
