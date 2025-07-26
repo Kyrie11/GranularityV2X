@@ -117,9 +117,10 @@ class PointPillarHow2comm(nn.Module):
         print(f"g2_data.shape={g2_data.shape}")
         print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
-        delay = short_term[0]['ego']['time_delay'][record_len]
+        delay = short_term[0]['ego']['time_delay'][:record_len]
         print(f"delay={delay}")
         print(f"delay.shape={delay.shape}")
+        print(f"delay.type={type(delay)}")
 
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
