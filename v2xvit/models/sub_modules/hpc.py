@@ -32,6 +32,13 @@ class ShortTermEncoder(nn.Module):
         # Conv3d expects: [N, C_in, T, H, W]
         short_term_history = short_term_history.permute(0,2,1,3,4)
 
+        #可能T_short <3，进行动态填充
+        T = short_term_history.shape[2]
+        if T < 3:
+            padding_needed = 3 - T
+            padding_tuple = (0, 0, 0, 0, 0, padding_needed)
+            short_term_history = short_term_history.pad(short_term_history, padding_tuple, mode="replicate")
+
         # 由于我们的T_short=3, kernel_size=3, padding=0, 时间维度会被压缩为1
         encoded_map = self.conv3d(short_term_history)
 
