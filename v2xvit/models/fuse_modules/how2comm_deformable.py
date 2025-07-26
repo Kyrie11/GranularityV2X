@@ -87,7 +87,12 @@ class How2comm(nn.Module):
         self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8, g1_out=g1_out,
                                                      g2_out=g2_out, g3_out=g3_out, unified_channel=unified_channel)
 
-        # self.distillation_loss = DistillationLoss()
+        g1_encoder = self.unified_bev_encoder.g1_encoder
+        g2_encoder = self.unified_bev_encoder.g2_encoder
+        g3_encoder = self.unified_bev_encoder.g3_encoder
+        fusion_conv = self.unified_bev_encoder.fusion_conv
+        self.distillation_loss = DistillationLoss(unified_bev_channels=unified_channel, g1_encoder=g1_encoder,
+                                                  g2_encoder=g2_encoder, g3_encoder=g3_encoder, fusion_conv=fusion_conv)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
@@ -98,6 +103,7 @@ class How2comm(nn.Module):
         short_his_g1, short_his_g2, short_his_g3 = short_his
         long_his_g1, long_his_g2, long_his_g3 = long_his
 
+        print(f"g1_data.shape={g1_data.shape}")
         # =======短期历史数据编码=======
         short_his_g1_stacked = torch.stack(short_his_g1, dim=1)  # [N,T,C,H,W]
         short_his_g2_stacked = torch.stack(short_his_g2, dim=1)
@@ -131,6 +137,7 @@ class How2comm(nn.Module):
                                                          W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
 
         long_time_gaps = [i * -100 * self.long_intervals for i in range(T_long)]  # 时间回溯gap,譬如[0,-300,-600,-900]
+        print(f"长期历史延时时间为：{long_time_gaps}")
         # 编码历史上下文信息
         encoded_contexts = self.temporal_context_encoder(short_his_unified_bev, long_his_unified_bev, long_time_gaps)
 
@@ -150,7 +157,7 @@ class How2comm(nn.Module):
         predicted_g1 = predictions['predicted_g1']
         predicted_g2 = predictions['predicted_g2']
         predicted_g3 = predictions['predicted_g3']
-
+        print(f"predicted_g1.shape={predicted_g1.shape}")
         # 沿着通道维度(dim=1)计算余弦相似度。
         # 输出的 cos_sim 的形状为 [N, H, W]
         # 将余弦相似度转换为损失。
@@ -164,6 +171,14 @@ class How2comm(nn.Module):
         cos_sim3 = (1 - cos_sim3).mean()
         delay_loss = cos_sim1 + cos_sim2 + cos_sim3
         return predicted_g1, predicted_g2, predicted_g3, delay_loss
+
+    def get_stacked_his(self, history):
+        his_stacked = torch.stack(history, dim=1)
+        N, T, _, H, W = his_stacked.shape
+        assert len(history) == T, "the length is wrong!!!"
+        his_stacked = his_stacked.view(N * T, -1, H, W)  # [N * T, C, H, W]
+        return his_stacked
+
 
     '''
         g1_data: vox-level data
@@ -195,24 +210,11 @@ class How2comm(nn.Module):
             g2_data[1:] = predicted_g2[1:]
             g3_data[1:] = predicted_g3[1:]
 
-        if self.multi_scale:
-            ups = []
-            with_resnet = True if hasattr(backbone, 'resnet') else False
-            if with_resnet:
-                g2_feats = backbone.resnet(g2_data)
-                # g2_short_feats = backbone.resnet(g2_short_his)
-                # g2_long_feats = backbone.resnet(g2_long_his)
-
-            for i in range(self.num_levels):
-                g2_data = g2_feats[i] if with_resnet else backbone.blocks[i](g2_data)
-                # g2_short_his = g2_short_feats[i] if with_resnet else backbone.blocks[i](g2_short_his)
-                # g2_long_his = g2_long_feats[i] if with_resnet else backbone.blocks[i](g2_long_his)
-
-                if i == 0:
-                    if self.communication:
-                        batch_g1_list = self.regroup(g1_data)
-                        batch_g2_list = self.regroup(g2_data)
-                        batch_g3_list = self.regroup(g3_data)
+        unified_bev_maps = self.unified_bev_encoder(g1_data, g2_data, g3_data)
+        if self.communication:
+            ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume = self.communication_net(g1_data, g2_data,
+                                                                                               g3_data, unified_bev_maps)
+            commu_loss = self.distillation_loss(ego_demand, unified_bev_maps, sparse_g1, sparse_g2, sparse_g3)
 
 
         for b in range(B):

@@ -179,7 +179,7 @@ class AdvancedCommunication(nn.Module):
 
         return sparse_g1, sparse_g2, sparse_g3
 
-    def forward(self, g1_list, g2_list, g3_list, unified_list):
+    def forward(self, g1, g2, g3, unified_bev):
         '''
         :param g1_list: g1数据列表，长度为batch_size
         :param g2_list:
@@ -187,57 +187,31 @@ class AdvancedCommunication(nn.Module):
         :param unified_list: 三个粒度数据通道拼接再经过1x1卷积
         :return:
         '''
-        batch_size = len(g1_list)
-        device = g1_list[0].device
-        sparse_g1_out, sparse_g2_out, sparse_g3_out = [], [], []
-        decision_mask_list = []
-        total_commu_volume = []
+        device = g1.device()
+        commu_volume = 0
 
-        for b in range(batch_size):
-            batch_g1, batch_g2, batch_g3 = g1_list[b], g2_list[b], g3_list[b]
-            num_agents, c_g1, H, W = batch_g1.shape
-            c_g3 = batch_g3.shape[1]
-            unified_bev = unified_list[b]
+        num_agents, c_g1, H, W = g1.shape
+        ego_bev = unified_bev[0:1]  # Shape: [1, C', H, W]
+        ego_confidence = self.gcm(ego_bev)  # Shape: [1, 3, H, W]
+        ego_demand = 1.0 - ego_confidence  # Shape: [1, 3, H, W]
 
-            if num_agents <= 1:
-                # If no collaborators, append empty tensors to maintain output structure
-                sparse_g1_out.append(batch_g1)
-                sparse_g2_out.append(batch_g2)
-                sparse_g3_out.append(batch_g3)
-                continue
+        if num_agents <= 1:
+            # If no collaborators, append empty tensors to maintain output structure
+            return ego_demand, g1, g2, g3, commu_volume
 
-            ego_bev = unified_bev[0:1]  # Shape: [1, C', H, W]
-            collaborator_bevs = unified_bev[1:]  # Shape: [N-1, C', H, W]
+        collaborator_bevs = unified_bev[1:]  # Shape: [N-1, C', H, W]
 
-            ego_confidence = self.gcm(ego_bev)   # Shape: [1, 3, H, W]
-            ego_demand = 1.0 - ego_confidence  # Shape: [1, 3, H, W]
-            expanded_ego_demand = ego_demand.expand(num_agents-1, -1, -1, -1)
 
-            collaborator_confidences = self.gcm(collaborator_bevs)  # Shape: [N-1, 3, H, W]
+        expanded_ego_demand = ego_demand.expand(num_agents-1, -1, -1, -1)
 
-            combined_features = torch.cat((expanded_ego_demand, collaborator_confidences), dim=1)
-            combined_features = torch.cat((expanded_ego_demand, collaborator_confidences), dim=1)
-            utility_maps = self.umm(combined_features)
-            sparse_maps = self.selection_net(utility_maps)
+        collaborator_confidences = self.gcm(collaborator_bevs)  # Shape: [N-1, 3, H, W]
 
-            sparse_g1, sparse_g2, sparse_g3 = self.get_sparse_data(batch_g1, batch_g2, batch_g3, sparse_maps)
+        combined_features = torch.cat((expanded_ego_demand, collaborator_confidences), dim=1)
+        utility_maps = self.umm(combined_features) #[N-1,3,H,W]
+        sparse_maps = self.selection_net(utility_maps) #[N-1,3,H,W]
 
-            sparse_g1_out.append(sparse_g1)
-            sparse_g2_out.append(sparse_g2)
-            sparse_g3_out.append(sparse_g3)
+        sparse_g1, sparse_g2, sparse_g3 = self.get_sparse_data(g1, g2, g3, sparse_maps) #返回的ego-agent的数据不变，其他的稀疏化
 
-            commu_volume = sparse_g1.sum() + sparse_g2.sum() + sparse_g3.sum()
+        commu_volume = sparse_maps.sum()
 
-            total_commu_volume.append(commu_volume)
-        sparse_data = [sparse_g1_out, sparse_g2_out, sparse_g3_out]
-        dense_data = [g1_list, g2_list, g3_list]
-        loss = self.contrastive_sparsity_loss(sparse_data, dense_data, decision_mask_list)
-        if len(total_commu_volume) < 1:
-            mean_communication_volume = 0
-        else:
-            mean_communication_volume = torch.mean(torch.stack(total_commu_volume).float())
-        return (torch.cat(sparse_g1_out, dim=0),
-                torch.cat(sparse_g2_out, dim=0),
-                torch.cat(sparse_g3_out, dim=0),
-                loss,
-                mean_communication_volume)
+        return ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume

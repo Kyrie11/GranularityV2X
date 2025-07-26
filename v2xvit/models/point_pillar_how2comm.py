@@ -180,8 +180,7 @@ class PointPillarHow2comm(nn.Module):
             if self.dcn:
                 spatial_features_2d = self.dcn_net(spatial_features_2d)
 
-            spatial_features = batch_dict['spatial_features']
-            his_g2.append(spatial_features)
+            his_g2.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)
             g1 = self.get_g1_bev(voxel_features, voxel_num_points, voxel_coords)
             his_g1.append(g1)

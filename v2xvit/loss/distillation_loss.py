@@ -85,7 +85,7 @@ class DistillationLoss(nn.Module):
     """
         计算稀疏重建特征 H' 与 FiLM 调制后的目标特征 I_aware 之间的蒸馏损失。
     """
-    def __init__(self, unified_bev_channels: int, encoders: List[nn.Module], fusion_conv: nn.Module):
+    def __init__(self, unified_bev_channels: int, g1_encoder, g2_encoder, g3_encoder, fusion_conv: nn.Module):
         """
         初始化。
         参数:
@@ -95,13 +95,15 @@ class DistillationLoss(nn.Module):
         """
         super().__init__()
         self.film_param_generator = FiLMParameterGenerator(unified_bev_channels)
-        self.reconstruction_head = ReconstructionHead(encoders[0], encoders[1], encoders[2], fusion_conv)
+        self.reconstruction_head = ReconstructionHead(g1_encoder, g2_encoder, g3_encoder, fusion_conv)
         # FiLM Layer 本身只是一个操作，不需要是 nn.Module
 
     def forward(self,
                 ego_demand: torch.Tensor,
                 collaborator_unified_bevs: torch.Tensor,
-                sparse_datas: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> torch.Tensor:
+                sparse_g1,
+                sparse_g2,
+                sparse_g3) -> torch.Tensor:
         """
         计算最终的损失值。
         参数:
@@ -130,7 +132,6 @@ class DistillationLoss(nn.Module):
             i_aware = gamma * collaborator_unified_bevs + beta
 
         # 3. 从稀疏数据重建预测特征 H'_{j}
-        sparse_g1, sparse_g2, sparse_g3 = sparse_datas
         h_prime = self.reconstruction_head(sparse_g1, sparse_g2, sparse_g3)
 
         # 4. 计算蒸馏损失 (L2-loss / MSE is a common choice)
