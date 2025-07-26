@@ -129,7 +129,6 @@ def main():
     epoches = hypes['train_params']['epoches']
     # used to help schedule learning rate
     for epoch in range(init_epoch, max(epoches, init_epoch)):
-        model.fusion_net.reset_hidden_state()
         if hypes['lr_scheduler']['core_method'] != 'cosineannealwarm':
             scheduler.step(epoch)
         if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
