@@ -14,10 +14,6 @@ class ShortTermEncoder(nn.Module):
     '''
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        # self.gru = nn.GRU(input_size=input_dim,
-        #                   hidden_dim=hidden_dim,
-        #                   num_layers=1,
-        #                   batch_first=True)
         self.conv3d = nn.Sequential(
             #Input: [N,C_in,T,H,W]
             nn.Conv3d(input_dim, 32, kernel_size=(3,3,3), padding=(0,1,1)),
@@ -117,7 +113,7 @@ class LongTermEncoder(nn.Module):
 #====================
 #长短期信息Encoder
 #====================
-class TemporalContextEncoder(nn.Module):
+class AgentEncoder(nn.Module):
     def __init__(self,
                  total_input_channels,
                  s_ctx_channels,
@@ -179,20 +175,89 @@ class DynamicGatingModule(nn.Module):
 #=====================================
 #分层运动预测头
 #=====================================
+# class HierarchicalPredictionHead(nn.Module):
+#     """
+#     从融合特征中分层预测运动场。
+#     - O_v: 主要的、密集的基础运动场。
+#     - O_f, O_r: 稀疏的残差运动修正。
+#     - S: 置信度调制图。
+#     """
+#
+#     def __init__(self,
+#                  feature_dim: int,
+#                  output_shape: Tuple[int, int]):
+#         """
+#         Args:
+#             feature_dim (int): 输入的融合特征维度。
+#             output_shape (Tuple[int, int]): 输出的BEV图谱的空间尺寸 (H, W)。
+#         """
+#         super().__init__()
+#         self.output_shape = output_shape
+#         self.total_pixels = output_shape[0] * output_shape[1]
+#
+#         # 共享的解码器主干
+#         self.decoder_trunk = nn.Sequential(
+#             nn.Linear(feature_dim, 512),
+#             nn.ReLU(inplace=True)
+#         )
+#
+#         # 独立的预测头
+#         # 头 for O_v: Base Motion Field (dx, dy)
+#         self.head_v = nn.Linear(512, 2 * self.total_pixels)
+#
+#         # 头 for O_f: Feature Residual (dx, dy)
+#         # 我们在这里不施加硬性约束，而是依赖于外部的稀疏性损失
+#         self.head_f = nn.Linear(512, 2 * self.total_pixels)
+#
+#         # 头 for O_r: Result Residual (dx, dy)
+#         self.head_r = nn.Linear(512, 2 * self.total_pixels)
+#
+#         # 头 for S: Confidence Scaler
+#         # 使用 Sigmoid 激活函数将置信度缩放到 (0, 1) 区间，这符合其物理意义
+#         self.head_s = nn.Sequential(
+#             nn.Linear(512, 1 * self.total_pixels),
+#             nn.Sigmoid()
+#         )
+#
+#     def forward(self, fused_context: torch.Tensor) -> Dict[str, torch.Tensor]:
+#         """
+#         Args:
+#             fused_context (torch.Tensor): 融合后的上下文特征。Shape: (N, feature_dim)
+#
+#         Returns:
+#             Dict[str, torch.Tensor]: 一个包含四个预测结果的字典。
+#                                      残差场被明确标识出来以计算稀疏性损失。
+#         """
+#         print("融合历史上下文shape:", fused_context.shape)
+#         N = fused_context.shape[0]
+#
+#         # 通过共享主干
+#         intermediate_feat = self.decoder_trunk(fused_context)
+#
+#         # Reshape helper
+#         def _reshape(flat_tensor, channels):
+#             return flat_tensor.view(N, channels, *self.output_shape)
+#
+#         # 从主干特征并行生成所有头
+#         base_motion = _reshape(self.head_v(intermediate_feat), 2)
+#         feature_residual = _reshape(self.head_f(intermediate_feat), 2)
+#         result_residual = _reshape(self.head_r(intermediate_feat), 2)
+#
+#         # head_s 包含Sigmoid，所以直接用它
+#         confidence_scaler_flat = self.head_s[0](intermediate_feat)
+#         confidence_scaler = _reshape(confidence_scaler_flat, 1)
+#
+#         return {
+#             "base_motion_field": base_motion,  # O_v
+#             "feature_residual_field": feature_residual,  # O_f (待施加稀疏损失)
+#             "result_residual_field": result_residual,  # O_r (待施加稀疏损失)
+#             "confidence_scaler": confidence_scaler  # S
+#         }
+
 class HierarchicalPredictionHead(nn.Module):
-    """
-    从融合时空上下文中分层预测运动场。
-    - O_v: 主要的、密集的基础运动场。
-    - O_f, O_r: 稀疏的残差运动修正。
-    - S: 置信度调制图。
-    """
+    """(新) 接收融合后的特征图，并预测出最终的运动场和置信度。"""
 
     def __init__(self, input_channels, output_shape):
-        """
-        Args:
-            feature_dim (int): 输入的融合特征维度。
-            output_shape (Tuple[int, int]): 输出的BEV图谱的空间尺寸 (H, W)。
-        """
         super().__init__()
         self.output_shape = output_shape
 
@@ -200,51 +265,22 @@ class HierarchicalPredictionHead(nn.Module):
             nn.Conv2d(input_channels, 128, 3, padding=1), nn.ReLU(inplace=True),
             nn.Conv2d(128, 64, 3, padding=1), nn.ReLU(inplace=True)
         )
-
-        # 独立的预测头
-        # 头 for O_v: Base Motion Field (dx, dy)
-        self.head_v = nn.Linear(64, 2, 1)
-
-        # 头 for O_f: Feature Residual (dx, dy)
-        # 我们在这里不施加硬性约束，而是依赖于外部的稀疏性损失
-        self.head_f = nn.Linear(64, 2, 1)
-
-        # 头 for O_r: Result Residual (dx, dy)
-        self.head_r = nn.Linear(64, 2, 1)
-
-        # 头 for S: Confidence Scaler
-        # 使用 Sigmoid 激活函数将置信度缩放到 (0, 1) 区间，这符合其物理意义
+        self.head_v = nn.Conv2d(64, 2, 1)  # base_motion_field (dx, dy)
+        self.head_f = nn.Conv2d(64, 2, 1)  # feature_residual_field
+        self.head_r = nn.Conv2d(64, 2, 1)  # result_residual_field
         self.head_s = nn.Sequential(
             nn.Conv2d(64, 1, 1),
             nn.Sigmoid()
-        )
+        )  # confidence_scaler
 
-    def forward(self, fused_context):
-        print("融合后的历史上下文的shape是：", fused_context.shape)
-
-        N = fused_context.shape[0]
-        # 通过共享主干
-        intermediate_feat = self.decoder_trunk(fused_context)
-
-        def _reshape(flat_tensor, channels):
-            return flat_tensor.view(N, channels, *self.output_shape)
-
-        # 从主干特征并行生成所有头
-        base_motion = _reshape(self.head_v(intermediate_feat), 2)
-        feature_residual = _reshape(self.head_f(intermediate_feat), 2)
-        result_residual = _reshape(self.head_r(intermediate_feat), 2)
-
-        # head_s 包含Sigmoid，所以直接用它
-        confidence_scaler_flat = self.head_s(intermediate_feat)
-        confidence_scaler = _reshape(confidence_scaler_flat, 1)
-
+    def forward(self, fused_map):
+        x = self.decoder_trunk(fused_map)
         return {
-            "base_motion_field": base_motion,          # O_v
-            "feature_residual_field": feature_residual,  # O_f (待施加稀疏损失)
-            "result_residual_field": result_residual,    # O_r (待施加稀疏损失)
-            "confidence_scaler": confidence_scaler       # S
+            "base_motion_field": self.head_v(x),
+            "feature_residual_field": self.head_f(x),
+            "result_residual_field": self.head_r(x),
+            "confidence_scaler": self.head_s(x)
         }
-
 #==================================
 #将时间上下文解码
 #==================================
@@ -268,7 +304,7 @@ class ContextExtrapolator(nn.Module):
 
         self.gating_module = DynamicGatingModule(fusion_dim)
 
-        #1x1卷积yong'yu处理和对齐上下文通道
+        #1x1卷积用于处理和对齐上下文通道
         self.s_ctx_processor = nn.Conv2d(s_ctx_channels, fusion_dim, 1)
         self.l_ctx_processor = nn.Conv2d(l_ctx_dim, fusion_dim, 1)
 
@@ -282,14 +318,16 @@ class ContextExtrapolator(nn.Module):
         self.register_buffer('identity_grid', identity_grid.unsqueeze(0), persistent=False)
 
     def warp(self, feature_map, motion_field):
-        N,_,H,W = feature_map.shape
-        norm_identity_grid = self.identity_grid * 2.0 / torch.tensor([W-1, H-1], device=self.identity_grid.device) - 1.0
+        N, _, H, W = feature_map.shape
+        norm_identity_grid = self.identity_grid * 2.0 / torch.tensor([W - 1, H - 1],
+                                                                     device=self.identity_grid.device) - 1.0
         motion_field_transposed = motion_field.permute(0, 2, 3, 1)
         norm_motion_field = motion_field_transposed * 2.0 / torch.tensor([W - 1, H - 1], device=motion_field.device)
         new_grid = norm_identity_grid + norm_motion_field
         return F.grid_sample(feature_map, new_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
 
-    def forward(self,
+
+def forward(self,
                 s_ctx: torch.Tensor,
                 l_ctx: torch.Tensor,
                 delayed_g1_frame: torch.Tensor,
