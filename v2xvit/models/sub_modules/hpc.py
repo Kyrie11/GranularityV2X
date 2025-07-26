@@ -145,6 +145,7 @@ class TemporalContextEncoder(nn.Module):
         interval_tensor = torch.tensor(long_term_interval, device=short_term_his.device).float()
 
         #编码非对称上下文
+        print("输入到short_term_encoder的tensor的shape是:", short_term_his.shape)
         s_ctx = self.short_term_encoder(short_term_his) #shape : [N,s_ctx_channels,H,W]
         l_ctx = self.long_term_encoder(long_term_his, interval_tensor) #[N, l_ctx_dim]
 
