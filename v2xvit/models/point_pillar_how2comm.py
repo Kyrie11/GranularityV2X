@@ -123,6 +123,8 @@ class PointPillarHow2comm(nn.Module):
         print(f"delay.shape={delay.shape}")
 
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
+        print(f"short_his_g1的长度为{len(short_his_g1)}")
+        print(f"short_his_g1[0].shape={short_his_g1[0].shape}")
         short_his_g1 = self.regroup(short_his_g1, record_len)
         short_his_g2 = self.regroup(short_his_g2, record_len)
         short_his_g3 = self.regroup(short_his_g3, record_len)
