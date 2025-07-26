@@ -37,7 +37,7 @@ class ShortTermEncoder(nn.Module):
         if T < 3:
             padding_needed = 3 - T
             padding_tuple = (0, 0, 0, 0, 0, padding_needed)
-            short_term_history = short_term_history.pad(short_term_history, padding_tuple, mode="replicate")
+            short_term_history = F.pad(short_term_history, padding_tuple, mode="replicate")
 
         # 由于我们的T_short=3, kernel_size=3, padding=0, 时间维度会被压缩为1
         encoded_map = self.conv3d(short_term_history)
@@ -152,9 +152,10 @@ class TemporalContextEncoder(nn.Module):
         interval_tensor = torch.tensor(long_term_interval, device=short_term_his.device).float()
 
         #编码非对称上下文
-        print("输入到short_term_encoder的tensor的shape是:", short_term_his.shape)
         s_ctx = self.short_term_encoder(short_term_his) #shape : [N,s_ctx_channels,H,W]
+        print("短期上下文的shape是：", s_ctx.shape)
         l_ctx = self.long_term_encoder(long_term_his, interval_tensor) #[N, l_ctx_dim]
+        print("长期上下文的shape是：", l_ctx.shape)
 
         return {
             "short_term_context": s_ctx,
