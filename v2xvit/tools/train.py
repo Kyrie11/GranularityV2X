@@ -182,14 +182,15 @@ def main():
             model.zero_grad()
             optimizer.zero_grad()
 
+            print(f"len(short_his_data)={len(short_his_data)}")
+            print(f"len(long_his_data)={len(long_his_data)}")
             # case1 : late fusion train --> only ego needed
             # case2 : early fusion train --> all data projected to ego
             # case3 : intermediate fusion --> ['ego']['processed_lidar']
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                print(f"len(short_his_data)={len(short_his_data)}")
-                print(f"len(long_his_data)={len(long_his_data)}")
+
                 ouput_dict = model(current_data, short_his_data, long_his_data)
                 final_loss = criterion(ouput_dict,
                                        current_data['ego']['label_dict'])
