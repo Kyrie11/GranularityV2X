@@ -101,20 +101,20 @@ class PointPillarHow2comm(nn.Module):
     def forward(self, current_data, short_term, long_term):
         #===========current时刻的数据================
         #返回的是三个元素个数为1的列表
-        g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
+        # g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
         #从列表中分离
-        g1_data = g1_data[0]
-        g2_data = g2_data[0]
-        g3_data = g3_data[0]
+        # g1_data = g1_data[0]
+        # g2_data = g2_data[0]
+        # g3_data = g3_data[0]
         current_data_dict = current_data['ego']
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         record_len = current_data_dict['record_len']
-        g1_data = self.regroup(g1_data, record_len)[0]
-        g2_data = self.regroup(g2_data, record_len)[0]
-        g3_data = self.regroup(g3_data, record_len)[0]
-        print(f"g1_data.shape={g1_data.shape}")
-        print(f"g2_data.shape={g2_data.shape}")
-        print(f"g3_data.shape={g3_data.shape}")
+        # g1_data = self.regroup(g1_data, record_len)[0]
+        # g2_data = self.regroup(g2_data, record_len)[0]
+        # g3_data = self.regroup(g3_data, record_len)[0]
+        # print(f"g1_data.shape={g1_data.shape}")
+        # print(f"g2_data.shape={g2_data.shape}")
+        # print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
         delay = short_term[0]['ego']['time_delay']
         print(f"delay={delay}")
