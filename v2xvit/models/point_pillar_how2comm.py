@@ -100,6 +100,7 @@ class PointPillarHow2comm(nn.Module):
 
     def forward(self, current_data, short_term, long_term):
         #===========current时刻的数据================
+        print(len(current_data))
         #返回的是三个元素个数为1的列表
         # g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
         #从列表中分离
