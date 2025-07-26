@@ -190,14 +190,13 @@ def main():
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-
                 ouput_dict = model(current_data, short_his_data, long_his_data)
                 final_loss = criterion(ouput_dict,
                                        current_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
                 with torch.cuda.amp.autocast():
-                    ouput_dict = model(short_his_data, long_his_data)
+                    ouput_dict = model(current_data, short_his_data, long_his_data)
                     # first argument is always your output dictionary,
                     # second argument is always your label dictionary.
                     final_loss = criterion(ouput_dict,
