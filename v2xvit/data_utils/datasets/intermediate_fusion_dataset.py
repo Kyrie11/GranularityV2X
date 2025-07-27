@@ -351,7 +351,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
             # ## THE FIX 1: 初始化 agent 的全局计数器 ##
             agent_idx_counter = 0
-
+            label_dict_list = []
             # Now, loop through the data for each sample *within this specific frame*
             for i, data in enumerate(frame_batch):
                 # Extract the pre-merged lidar dict for this sample
@@ -373,7 +373,7 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     # 您可能需要在这里添加一个逻辑来处理空帧的情况
                     # 例如，创建一个空的 final_frame_dict 或直接 continue
                     continue
-
+                label_dict_list.append(data['ego']['label_dict'])
                 # Data that is batched at the "sample" level
                 object_bbx_center_list.append(data['ego']['object_bbx_center'])
                 object_bbx_mask_list.append(data['ego']['object_bbx_mask'])
@@ -411,6 +411,8 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
             ## NEW ##: Convert the gathered timestamps into a tensor
             agent_timestamps_list = torch.from_numpy(np.array(agent_timestamps_list)).float()
 
+            batched_label_dict = self.post_processor.collate_batch(label_dict_list)
+
             # Create the final batched dictionary for this frame
             final_frame_dict = {
                 'ego': {
@@ -423,9 +425,9 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
                     'infra': infra_list,
                     'pairwise_t_matrix': torch.from_numpy(np.array(pairwise_t_matrix_list)).float(),
                     'spatial_correction_matrix': torch.from_numpy(np.array(spatial_correction_matrix_list)).float(),
-
                     ## NEW ##: Add the final batched tensor to the dictionary
-                    'agent_timestamps': agent_timestamps_list
+                    'agent_timestamps': agent_timestamps_list,
+                    'label_dict': batched_label_dict
                 }
             }
             output_data_list.append(final_frame_dict)
