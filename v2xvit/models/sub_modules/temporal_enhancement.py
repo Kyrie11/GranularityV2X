@@ -43,6 +43,7 @@ class HistoryContextAdaptiveEnhancement(nn.Module):
 
         # === Step 2: Dual-Pathway Enhancement Layers ===
         # Pathway 1: Content Enhancement. Output channels must match current_channels for addition.
+        print("history_channels=", history_channels)
         self.content_pathway = ConvBlock(history_channels, current_channels)
 
         # Pathway 2: Attention Modulation. Output is a single-channel map for spatial gating.
