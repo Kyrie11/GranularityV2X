@@ -260,7 +260,8 @@ class How2comm(nn.Module):
         g3_data = warp_affine_simple(g3_data, t_matrix[0, :, :, :], (H,W))
 
         if self.communication:
-            ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume = self.communication_net(g1_data, g2_data,
+            #sparse_mask[N-1,3,H,W}
+            ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume, sparse_mask = self.communication_net(g1_data, g2_data,
                                                                                                g3_data, current_unified_bev)
             commu_loss = self.distillation_loss(ego_demand, current_unified_bev, sparse_g1, sparse_g2, sparse_g3)
 
@@ -271,6 +272,6 @@ class How2comm(nn.Module):
 
             ego_unified_bev = current_unified_bev[0:1]
 
-            fused_feat = self.std_net(ego_unified_bev, ego_demand, collab_sparse_data, )
+            fused_feat = self.std_net(ego_unified_bev, ego_demand, collab_sparse_data, sparse_mask, [self.g1_encoder, self.g2_encoder, self.g3_encoder], self.fusion_conv)
 
         return fused_feat, commu_volume, delay_loss, commu_loss

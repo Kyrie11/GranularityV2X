@@ -217,4 +217,4 @@ class AdvancedCommunication(nn.Module):
 
         commu_volume = sparse_maps.sum()
 
-        return ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume
+        return ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume, sparse_maps
