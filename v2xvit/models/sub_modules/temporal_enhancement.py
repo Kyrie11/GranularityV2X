@@ -6,6 +6,7 @@ from typing import Tuple
 class ConvBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, use_relu: bool = True):
         super().__init__()
+        print("convblock里的out_channels:", out_channels)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
         # Using GroupNorm is often more stable for BEV features than BatchNorm,
         # especially with varying or small batch sizes.
