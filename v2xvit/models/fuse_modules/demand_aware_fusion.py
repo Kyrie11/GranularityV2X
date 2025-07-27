@@ -151,7 +151,7 @@ class DemandDrivenFusionNetwork(nn.Module):
     def __init__(self, model_dim: int, g_out: int, num_heads: int, num_sampling_points: int):
         super().__init__()
         self.fusion_attention = DualGuidanceAttentionFusion(
-            model_dim=g_out,
+            model_dim=model_dim,
             num_heads=num_heads,
             num_sampling_points=num_sampling_points
         )
