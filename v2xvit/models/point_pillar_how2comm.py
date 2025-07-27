@@ -142,8 +142,8 @@ class PointPillarHow2comm(nn.Module):
         #     fused_feature = self.shrink_conv(fused_feature)
 
         #============使用另外的decoder来预测(防止复用)=============
-        psm = self.cls_head(fused_feature)
-        rm = self.reg_head(fused_feature)
+        psm = self.classification_head(fused_feature)
+        rm = self.regression_head(fused_feature)
         output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
 

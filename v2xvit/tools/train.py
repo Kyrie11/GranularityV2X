@@ -215,9 +215,8 @@ def main():
                 final_loss.backward()
                 optimizer.step()
             else:
-                scaler.scale(final_loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                final_loss.backward()
+                optimizer.step()
         if epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
