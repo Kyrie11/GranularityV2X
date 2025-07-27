@@ -76,9 +76,10 @@ class How2comm(nn.Module):
         feature_size = (100, 352)
 
         #============三个粒度数据的编码器================
-        g1_in, g1_out = 8, 128
-        g2_in, g2_out = 256, 128
-        g3_in, g3_out = 8, 128
+        g_out = 128
+        g1_in, g1_out = 8, g_out
+        g2_in, g2_out = 256, g_out
+        g3_in, g3_out = 8, g_out
         unified_channel = 256
         total_input = g1_out + g2_out + g3_out
         self.g1_encoder = GranularityEncoder(input_channels=g1_in, output_channels=g1_out)
@@ -106,7 +107,7 @@ class How2comm(nn.Module):
 
         self.gain_gated_module = GainGatedModulation(channels=unified_channel)
 
-        self.fused_net = DemandDrivenFusionNetwork(model_dim=128, num_heads=4, num_sampling_points=8)
+        self.fused_net = DemandDrivenFusionNetwork(model_dim=unified_channel, num_heads=4, num_sampling_points=8)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
