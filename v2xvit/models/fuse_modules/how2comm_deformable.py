@@ -244,7 +244,8 @@ class How2comm(nn.Module):
 
             ego_stx = short_term_ctx[0:1]
             ego_ltx = long_term_ctx[0:1]
-
+            print("长期上下文ego_ltx的shape:", ego_ltx.shape)
+            print("短期上下文ego_stx的shape:", ego_stx.shape)
             #=======对当前帧进行时序增强(只对ego增强了)=========
             ego_enhanced = self.hdae_module(current_unified_bev[0:1], ego_stx, ego_ltx)
             current_unified_bev[0:1] = ego_enhanced
