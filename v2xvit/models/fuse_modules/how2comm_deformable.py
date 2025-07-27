@@ -227,7 +227,7 @@ class How2comm(nn.Module):
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
         delay_loss = torch.tensor(0.0, device=device)
-        if short_his and long_his:
+        if len(short_his) > 1 and len(long_his) > 1:
             predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(current_g1_data, current_g2_data, current_g3_data,
                                                                             short_his, long_his, delay)
             print(f"predicted_g1.shape={predicted_g1.shape}")
