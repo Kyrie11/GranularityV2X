@@ -153,10 +153,7 @@ class AgentEncoder(nn.Module):
         l_ctx = self.long_term_encoder(long_term_his, interval_tensor) #[N, l_ctx_dim]
 
 
-        return {
-            "short_term_context": s_ctx,
-            "long_term_context": l_ctx,
-        }
+        return s_ctx, l_ctx
 
 #==================
 #动态门控开关

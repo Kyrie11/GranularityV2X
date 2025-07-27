@@ -162,10 +162,7 @@ class How2comm(nn.Module):
         long_time_gaps = [i * -100 * self.long_intervals for i in range(T_long)]  # 时间回溯gap,譬如[0,-300,-600,-900]
         print(f"长期历史延时时间为：{long_time_gaps}")
         # 编码历史上下文信息
-        encoded_contexts = self.temporal_context_encoder(short_his_unified_bev, long_his_unified_bev, long_time_gaps)
-
-        short_term_context = encoded_contexts['short_term_context'], #短期上下文
-        long_term_context = encoded_contexts['long_term_context'],  #长期上下文
+        short_term_context, long_term_context = self.temporal_context_encoder(short_his_unified_bev, long_his_unified_bev, long_time_gaps)
         print("短期上下文的shape是：", short_term_context.shape)
         print("长期上下文的shape是：", long_term_context.shape)
 
