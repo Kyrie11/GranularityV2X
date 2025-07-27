@@ -107,7 +107,7 @@ class How2comm(nn.Module):
 
         self.gain_gated_module = GainGatedModulation(channels=unified_channel)
 
-        self.fused_net = DemandDrivenFusionNetwork(model_dim=unified_channel, num_heads=4, num_sampling_points=8)
+        self.fused_net = DemandDrivenFusionNetwork(model_dim=unified_channel, g_out=g_out, num_heads=4, num_sampling_points=8)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)

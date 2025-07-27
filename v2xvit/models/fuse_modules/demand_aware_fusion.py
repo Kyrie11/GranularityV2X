@@ -145,10 +145,10 @@ class DemandDrivenFusionNetwork(nn.Module):
     Orchestrates the entire demand-driven fusion process.
     """
 
-    def __init__(self, model_dim: int, num_heads: int, num_sampling_points: int):
+    def __init__(self, model_dim: int, g_out: int, num_heads: int, num_sampling_points: int):
         super().__init__()
         self.fusion_attention = DualGuidanceAttentionFusion(
-            model_dim=model_dim,
+            model_dim=g_out,
             num_heads=num_heads,
             num_sampling_points=num_sampling_points
         )
