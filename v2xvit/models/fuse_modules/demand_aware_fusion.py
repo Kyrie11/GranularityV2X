@@ -41,33 +41,59 @@ class DualGuidanceAttentionFusion(nn.Module):
                 ego_demand: torch.Tensor,
                 collaborator_features_per_granularity: List[torch.Tensor],
                 collaborator_masks: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            ego_features: Ego-agent's feature map (H_i). Shape: [1, C, H, W].
+            ego_demand: Ego-agent's demand map (D_i). Shape: [1, 3, H, W].
+            collaborator_features_per_granularity: List of 3 tensors [H''_j,g],
+                each of shape [N-1, C_g, H, W]. Here C_g must be equal to model_dim.
+            collaborator_masks: Sparsity mask. Shape: [N-1, 3, H, W].
+
+        Returns:
+            torch.Tensor: The aggregated collaborative feature map (H_collab). Shape: [1, C, H, W].
+        """
+        if len(collaborator_features_per_granularity) == 0 or collaborator_features_per_granularity[0].shape[0] == 0:
+            # If there are no collaborators, return a zero tensor of the correct shape.
+            return torch.zeros_like(ego_features)
+
         num_collabs, C, H, W = collaborator_features_per_granularity[0].shape
         device = ego_features.device
+
+        # --- 1. Formulate the comprehensive Query state Q_i ---
         if self.positional_embedding is None:
-            self.positional_embedding = nn.Parameter(torch.zeros(1, C, H, W, device=device))
+            # Dynamically create positional embedding based on feature map size
+            self.positional_embedding = nn.Parameter(torch.zeros(1, self.model_dim, H, W, device=device))
+
         encoded_demand = self.demand_encoder(ego_demand)
         query_state = ego_features + encoded_demand + self.positional_embedding
+
+        # --- 2. Generate Attention Parameters from Q_i ---
         params = self.param_gen_proj(query_state)
         params = params.view(1, self.num_heads, -1, H, W)
+
         offset_params, spatial_weight_params, granularity_weight_params = torch.split(
             params, [self.num_points * 2, self.num_points, self.num_points * 3], dim=2)
+
         offsets = offset_params.view(1, self.num_heads, self.num_points, 2, H, W).permute(0, 1, 4, 5, 2, 3)
         offsets = torch.tanh(offsets)
+
         spatial_weights = spatial_weight_params.view(1, self.num_heads, self.num_points, H, W).permute(0, 1, 3, 4, 2)
         spatial_weights = F.softmax(spatial_weights, dim=-1)
+
         granularity_weights = granularity_weight_params.view(1, self.num_heads, self.num_points, 3, H, W).permute(0, 1,
                                                                                                                   4, 5,
                                                                                                                   2, 3)
         granularity_weights = F.softmax(granularity_weights, dim=-1)
+
+        # --- 3. Generate Value (V_j,g) from collaborator features (H''_j,g) ---
         values_per_granularity = [self.value_proj(feat) for feat in collaborator_features_per_granularity]
+
+        # --- 4. Perform Dual-Guidance Sampling and Aggregation ---
         reference_grid = _create_grid_normalized(H, W, device).view(1, 1, H, W, 1, 2)
-        print(f"reference_grid.shape={reference_grid.shape}")
-        print("offset.shape=", offsets.shape)
-        print("self.num_points=",self.num_points)
-        print("self.num_heads=",self.num_heads)
-        print(f"H={H}, W={W}")
-        print(f"(reference_grid + offsets).shape={(reference_grid + offsets).shape}")
-        sampling_locations = (reference_grid + offsets).view(1, self.num_heads * H * W, self.num_points, 2)
+
+        # FIX 1: Use .reshape() to avoid contiguous error
+        sampling_locations = (reference_grid + offsets).reshape(1, self.num_heads * H * W, self.num_points, 2)
+
         sampled_values = []
         for g in range(3):
             val_g = values_per_granularity[g]
@@ -77,27 +103,40 @@ class DualGuidanceAttentionFusion(nn.Module):
                 mode='bilinear', padding_mode='zeros', align_corners=False
             )
             sampled_values.append(sampled_val)
+
         sampled_values = torch.stack(sampled_values, dim=0)
-        gran_weights_bc = granularity_weights.permute(5, 0, 1, 2, 3, 4).reshape(3, 1, self.num_heads, H * W,
-                                                                                self.num_points)
-        gran_weights_bc = gran_weights_bc.permute(0, 1, 3, 4, 2).reshape(3, 1, self.head_dim, self.num_heads * H * W,
-                                                                         self.num_points)
+
+        # FIX 2: Correctly reshape granularity weights for broadcasting
+        # Shape becomes [3, 1, 1, M*H*W, P] to broadcast with [3, N-1, C, M*H*W, P]
+        gran_weights_bc = granularity_weights.permute(5, 0, 1, 2, 3, 4)  # -> [3, 1, M, H, W, P]
+        gran_weights_bc = gran_weights_bc.reshape(3, 1, self.num_heads * H * W, self.num_points).unsqueeze(1)
+
         fused_collab_values = torch.sum(sampled_values * gran_weights_bc, dim=0)
+
         unified_mask = collaborator_masks.sum(dim=1, keepdim=True) > 0
         sampled_mask = F.grid_sample(
             unified_mask.float(),
             sampling_locations.expand(num_collabs, -1, -1, -1),
             mode='nearest', padding_mode='zeros', align_corners=False
         )
+
         summed_fused_values = (fused_collab_values * sampled_mask).sum(dim=0)
         num_agents_per_point = sampled_mask.sum(dim=0).clamp(min=1e-6)
         aggregated_value = summed_fused_values / num_agents_per_point
-        spatial_weights_bc = spatial_weights.view(1, self.num_heads * H * W, self.num_points).expand(self.model_dim, -1,
-                                                                                                     -1)
+
+        spatial_weights_bc = spatial_weights.view(1, self.num_heads * H * W, self.num_points)
+
         head_outputs = torch.sum(aggregated_value * spatial_weights_bc, dim=-1)
-        head_outputs = head_outputs.view(self.num_heads, self.head_dim, H, W)
-        concatenated_heads = head_outputs.permute(1, 0, 2, 3).reshape(1, self.model_dim, H, W)
-        H_collab = self.output_proj(concatenated_heads)
+
+        # --- 5. Output Projection ---
+        # FIX 3: Correctly aggregate heads
+        # Reshape from [C, M*H*W] to [C, M, H, W]
+        head_outputs_spatial = head_outputs.view(self.model_dim, self.num_heads, H, W)
+        # Sum across the heads dimension, and add back the batch dimension
+        aggregated_heads = head_outputs_spatial.sum(dim=1).unsqueeze(0)  # -> [1, C, H, W]
+
+        H_collab = self.output_proj(aggregated_heads)
+
         return H_collab
 
 
