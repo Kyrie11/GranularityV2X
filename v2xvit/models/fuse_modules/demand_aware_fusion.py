@@ -24,10 +24,15 @@ class DualGuidanceAttentionFusion(nn.Module):
         self.num_heads = num_heads
         self.num_points = num_sampling_points
         self.head_dim = model_dim // num_heads
+        # self.demand_encoder = nn.Sequential(
+        #     nn.Conv2d(demand_dim, self.model_dim // 2, kernel_size=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(self.model_dim // 2, self.model_dim, kernel_size=1)
+        # )
         self.demand_encoder = nn.Sequential(
             nn.Conv2d(demand_dim, self.model_dim // 2, kernel_size=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(self.model_dim // 2, self.model_dim, kernel_size=1)
+            nn.Conv2d(self.model_dim // 2, 256, kernel_size=1)
         )
         self.positional_embedding = None
         num_params_per_point = 2 + 1 + 3
@@ -62,7 +67,7 @@ class DualGuidanceAttentionFusion(nn.Module):
         # --- 1. Formulate the comprehensive Query state Q_i ---
         if self.positional_embedding is None:
             # Dynamically create positional embedding based on feature map size
-            self.positional_embedding = nn.Parameter(torch.zeros(1, self.model_dim, H, W, device=device))
+            self.positional_embedding = nn.Parameter(torch.zeros(1, 256, H, W, device=device))
 
         encoded_demand = self.demand_encoder(ego_demand)
         print("ego_features.shape=", ego_features.shape)
