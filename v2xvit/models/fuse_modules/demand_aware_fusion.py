@@ -61,6 +61,11 @@ class DualGuidanceAttentionFusion(nn.Module):
         granularity_weights = F.softmax(granularity_weights, dim=-1)
         values_per_granularity = [self.value_proj(feat) for feat in collaborator_features_per_granularity]
         reference_grid = _create_grid_normalized(H, W, device).view(1, 1, H, W, 1, 2)
+        print(f"reference_grid.shape={reference_grid.shape}")
+        print("offset.shape=", offsets.shape)
+        print("self.num_points=",self.num_points)
+        print("self.num_heads=",self.num_heads)
+        print(f"H={H}, W={W}")
         sampling_locations = (reference_grid + offsets).view(1, self.num_heads * H * W, self.num_points, 2)
         sampled_values = []
         for g in range(3):
