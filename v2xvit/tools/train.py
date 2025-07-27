@@ -148,33 +148,36 @@ def main():
             batch_data_list = train_utils.to_device(batch_data_list, device)
 
             print(f"一共有{len(batch_data_list)}帧")
-            historical_data = batch_data_list[1:]
-            short_his_data = historical_data[:n]
-            long_his_data = []
-            record_len = batch_data_list[0]['ego']['record_len']
-            # print("第0帧的时间戳：", batch_data_list[0]['ego']['agent_timestamps'])
-            historical_ego_indices = ego_indices_batch[0]
-            for j, frame_data in enumerate(historical_data):
-                # The ego timestamp for this frame is the j-th element in the historical index list
-                ego_ts_for_frame = historical_ego_indices[j].item()
-                agent_ts_list = frame_data['ego']['agent_timestamps']
-                # print(f"每个车的延迟分别为{frame_data['ego']['time_delay']}")
-                # print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
-                # print(f"  > Agent Timestamps: {agent_ts_list}")
-            print(f"historical_ego_indices={historical_ego_indices}")
-            if historical_ego_indices.nelement() > 0:
-                # The timeline starts from the most recent historical frame (e.g., t-1)
-                start_index = historical_ego_indices[0].item()
-                target_long_indices = [start_index - j * p for j in range(m)]
+            if len(batch_data_list) > 1:
+                historical_data = batch_data_list[1:]
+                short_his_data = historical_data[:n]
+                long_his_data = []
+                historical_ego_indices = ego_indices_batch[0]
+                if historical_ego_indices.nelement() > 0:
+                    # The timeline starts from the most recent historical frame (e.g., t-1)
+                    start_index = historical_ego_indices[0].item()
+                    target_long_indices = [start_index - j * p for j in range(m)]
 
-                for target_idx in target_long_indices:
-                    # Find the position of target_idx in the historical timeline
-                    match_pos = (historical_ego_indices == target_idx).nonzero(as_tuple=True)[0]
-                    if match_pos.nelement() > 0:
-                        # We found it, now grab the corresponding data snapshot
-                        # The index `frame_index` corresponds to the `historical_data` list
-                        frame_index = match_pos.item()
-                        long_his_data.append(historical_data[frame_index])
+                    for target_idx in target_long_indices:
+                        # Find the position of target_idx in the historical timeline
+                        match_pos = (historical_ego_indices == target_idx).nonzero(as_tuple=True)[0]
+                        if match_pos.nelement() > 0:
+                            # We found it, now grab the corresponding data snapshot
+                            # The index `frame_index` corresponds to the `historical_data` list
+                            frame_index = match_pos.item()
+                            long_his_data.append(historical_data[frame_index])
+            else:
+                short_his_data = []
+                long_his_data = []
+            # for j, frame_data in enumerate(historical_data):
+            #     # The ego timestamp for this frame is the j-th element in the historical index list
+            #     ego_ts_for_frame = historical_ego_indices[j].item()
+            #     agent_ts_list = frame_data['ego']['agent_timestamps']
+            #     # print(f"每个车的延迟分别为{frame_data['ego']['time_delay']}")
+            #     # print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
+            #     # print(f"  > Agent Timestamps: {agent_ts_list}")
+            print(f"historical_ego_indices={historical_ego_indices}")
+
             print("长期历史帧数：", len(long_his_data))
             print("短期历史帧数：", len(short_his_data))
             current_data = batch_data_list[0]
