@@ -27,8 +27,8 @@ train_params:
   max_cav: &max_cav 5
   frame: &frame 1 # 这个参数现在可以不用了，但为了兼容性可以保留
   lsh: # Long-Short History Parameters
-    m: 2 # Number of long-term frames
-    n: 2 # Number of short-term frames
+    m: 1 # Number of long-term frames
+    n: 1 # Number of short-term frames
     p: 3 # Period for long-term frames
 
 
