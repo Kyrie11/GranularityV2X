@@ -11,7 +11,11 @@ from icecream import ic
 from v2xvit.models.comm_modules.mutual_communication import AdvancedCommunication
 from v2xvit.models.sub_modules.torch_transformation_utils import warp_affine_simple
 from v2xvit.models.sub_modules.hpc import ContextExtrapolator, AgentEncoder
+from v2xvit.models.sub_modules.temporal_enhancement import HistoryContextAdaptiveEnhancement
+from v2xvit.models.sub_modules.gain_gated_modulation import GainGatedModulation
 from v2xvit.loss.distillation_loss import DistillationLoss
+from v2xvit.models.fuse_modules.demand_aware_fusion import STDNet
+
 
 class GranularityEncoder(nn.Module):
     def __init__(self, input_channels, output_channels):
@@ -70,35 +74,52 @@ class How2comm(nn.Module):
         result_map_channels = 8
         total_input_channels=physical_info_channels + bev_feature_channels + result_map_channels
         feature_size = (100, 352)
-        g1_out = 16
-        g2_out = 256
-        g3_out = 16
+
+        #============三个粒度数据的编码器================
+        g1_in, g1_out = 8, 16
+        g2_in, g2_out = 256, 256
+        g3_in, g3_out = 8, 16
         unified_channel = 256
-        #时延预测模块
+        total_input = g1_out + g2_out + g3_out
+        self.g1_encoder = GranularityEncoder(input_channels=g1_in, output_channels=g1_out)
+        self.g2_encoder = GranularityEncoder(input_channels=g2_in, output_channels=g2_out)
+        self.g3_encoder = GranularityEncoder(input_channels=g3_in, output_channels=g3_out)
+        self.fusion_conv = nn.Conv2d(total_input, unified_channel, kernel_size=1)
+        #============三个粒度数据的编码器================
+
+        #============时延预测模块============
         self.context_extrapolator = ContextExtrapolator(s_ctx_channels=s_ctx_channels, l_ctx_dim=l_ctx_dim, fusion_dim=128,
                                                         bev_feature_channels=bev_feature_channels, physical_info_channels=physical_info_channels,
                                                         result_map_channels=result_map_channels, feature_size=feature_size)
-
+        #============时延预测模块============
         self.temporal_context_encoder = AgentEncoder(total_input_channels=unified_channel,
                                                                s_ctx_channels=s_ctx_channels,
                                                                l_ctx_dim=l_ctx_dim,
                                                                feature_size=feature_size)
 
+        self.distillation_loss = DistillationLoss(unified_bev_channels=unified_channel, g1_encoder=self.g1_encoder,
+                                                  g2_encoder=self.g2_encoder, g3_encoder=self.g3_encoder, fusion_conv=self.fusion_conv)
 
-        self.unified_bev_encoder = UnifiedBevEncoder(g1_channels=8, g2_channels=256, g3_channels=8, g1_out=g1_out,
-                                                     g2_out=g2_out, g3_out=g3_out, unified_channel=unified_channel)
+        self.hdae_module = HistoryContextAdaptiveEnhancement(current_channels=unified_channel,
+                                                             short_ctx_channels=s_ctx_channels,
+                                                             long_ctx_dim=l_ctx_dim)
 
-        g1_encoder = self.unified_bev_encoder.g1_encoder
-        g2_encoder = self.unified_bev_encoder.g2_encoder
-        g3_encoder = self.unified_bev_encoder.g3_encoder
-        fusion_conv = self.unified_bev_encoder.fusion_conv
-        self.distillation_loss = DistillationLoss(unified_bev_channels=unified_channel, g1_encoder=g1_encoder,
-                                                  g2_encoder=g2_encoder, g3_encoder=g3_encoder, fusion_conv=fusion_conv)
+        self.gain_gated_module = GainGatedModulation(channels=unified_channel)
+
+        self.std_net = STDNet(model_dim=256, num_heads=4)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
         split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
         return split_x
+
+    def get_unified_bev(self, g1_data, g2_data, g3_data):
+        feature_g1 = self.g1_encoder(g1_data)
+        feature_g2 = self.g2_encoder(g2_data)
+        feature_g3 = self.g3_encoder(g3_data)
+        concatenated_features = torch.cat([feature_g1, feature_g2, feature_g3], dim=1)
+        unified_feature = self.fusion_conv(concatenated_features)
+        return unified_feature
 
     def delay_compensation(self, g1_data, g2_data, g3_data, short_his, long_his, delay):
         short_his_g1, short_his_g2, short_his_g3 = short_his
@@ -116,7 +137,7 @@ class How2comm(nn.Module):
         short_his_g2_stacked = short_his_g2_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
         short_his_g3_stacked = short_his_g3_stacked.view(N * T_short, -1, H, W)  # [N * T, C, H, W]
 
-        short_his_unified_bev = self.unified_bev_encoder(short_his_g1_stacked, short_his_g2_stacked,
+        short_his_unified_bev = self.get_unified_bev(short_his_g1_stacked, short_his_g2_stacked,
                                                          short_his_g3_stacked)  # Output: [N * T, C_unified, H, W]
         short_his_unified_bev = short_his_unified_bev.view(N, T_short, -1, H,
                                                            W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
@@ -127,12 +148,13 @@ class How2comm(nn.Module):
         long_his_g3_stacked = torch.stack(long_his_g3, dim=1)
 
         T_long = long_his_g1_stacked.shape[1]
+        assert T_long == len(long_his_g1), "the index is wrong!!"
 
         long_his_g1_stacked = long_his_g1_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
         long_his_g2_stacked = long_his_g2_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
         long_his_g3_stacked = long_his_g3_stacked.view(N * T_long, -1, H, W)  # [N * T, C, H, W]
 
-        long_his_unified_bev = self.unified_bev_encoder(long_his_g1_stacked, long_his_g2_stacked,
+        long_his_unified_bev = self.get_unified_bev(long_his_g1_stacked, long_his_g2_stacked,
                                                         long_his_g3_stacked)  # Output: [N * T, C_unified, H, W]
         long_his_unified_bev = long_his_unified_bev.view(N, T_long, -1, H,
                                                          W)  ## [N * T, C_unified, H, W] -> [N, T, C_unified, H, W]
@@ -142,6 +164,9 @@ class How2comm(nn.Module):
         # 编码历史上下文信息
         encoded_contexts = self.temporal_context_encoder(short_his_unified_bev, long_his_unified_bev, long_time_gaps)
 
+        short_term_context = encoded_contexts['short_term_context'], #短期上下文
+        long_term_context = encoded_contexts['long_term_context'],  #长期上下文
+
         delayed_g1_frame = short_his_g1[0]  # 要延迟补偿的帧
         delayed_g2_frame = short_his_g2[0]  # 要延迟补偿的帧
         delayed_g3_frame = short_his_g3[0]  # 要延迟补偿的帧
@@ -149,8 +174,8 @@ class How2comm(nn.Module):
         delay = delay * 100
         print("延迟时间是:", delay)
         predictions = self.context_extrapolator(
-            s_ctx=encoded_contexts['short_term_context'],
-            l_ctx=encoded_contexts['long_term_context'],
+            s_ctx=encoded_contexts['short_term_context'], #短期上下文
+            l_ctx=encoded_contexts['long_term_context'],  #长期上下文
             delayed_g1_frame=delayed_g1_frame,
             delayed_g2_frame=delayed_g2_frame,
             delayed_g3_frame=delayed_g3_frame,
@@ -173,7 +198,7 @@ class How2comm(nn.Module):
         cos_sim3 = F.cosine_similarity(predicted_g3, g3_data, dim=1)
         cos_sim3 = (1 - cos_sim3).mean()
         delay_loss = cos_sim1 + cos_sim2 + cos_sim3
-        return predicted_g1, predicted_g2, predicted_g3, delay_loss
+        return predicted_g1, predicted_g2, predicted_g3, delay_loss, short_term_context, long_term_context
 
     def get_stacked_his(self, history):
         his_stacked = torch.stack(history, dim=1)
@@ -202,10 +227,12 @@ class How2comm(nn.Module):
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
+        current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
 
         delay_loss = torch.tensor(0.0, device=device)
         if short_his and long_his:
-            predicted_g1, predicted_g2, predicted_g3, delay_loss = self.delay_compensation(g1_data, g2_data, g3_data,
+            (predicted_g1, predicted_g2, predicted_g3,
+             delay_loss, short_term_ctx, long_term_ctx) = self.delay_compensation(g1_data, g2_data, g3_data,
                                                                             short_his, long_his, delay)
             print(f"predicted_g1.shape={predicted_g1.shape}")
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
@@ -213,6 +240,19 @@ class How2comm(nn.Module):
             g2_data[1:] = predicted_g2[1:]
             g3_data[1:] = predicted_g3[1:]
 
+            current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
+
+            ego_stx = short_term_ctx[0:1]
+            ego_ltx = long_term_ctx[0:1]
+
+            #=======对当前帧进行时序增强(只对ego增强了)=========
+            ego_enhanced = self.hdae_module(current_unified_bev[0:1], ego_stx, ego_ltx)
+            current_unified_bev[0:1] = ego_enhanced
+
+        # #======对数据进行空间增强==============
+        # current_unified_bev = self.gain_gated_module(current_unified_bev)
+        # #==================================
+        
         #坐标对齐
         t_matrix = pairwise_t_matrix[0][:record_len, :record_len, :, :]
         H, W = g1_data.shape[2:]
@@ -220,15 +260,18 @@ class How2comm(nn.Module):
         g2_data = warp_affine_simple(g2_data, t_matrix[0, :, :, :], (H,W))
         g3_data = warp_affine_simple(g3_data, t_matrix[0, :, :, :], (H,W))
 
-        unified_bev_maps = self.unified_bev_encoder(g1_data, g2_data, g3_data)
         if self.communication:
             ego_demand, sparse_g1, sparse_g2, sparse_g3, commu_volume = self.communication_net(g1_data, g2_data,
-                                                                                               g3_data, unified_bev_maps)
-            commu_loss = self.distillation_loss(ego_demand, unified_bev_maps, sparse_g1, sparse_g2, sparse_g3)
+                                                                                               g3_data, current_unified_bev)
+            commu_loss = self.distillation_loss(ego_demand, current_unified_bev, sparse_g1, sparse_g2, sparse_g3)
 
             print("sparse_g1.shape=", sparse_g1.shape)
+            print("ego_demand.shape=", ego_demand.shape)
 
+            collab_sparse_data = [sparse_g1[1:], sparse_g2[1:], sparse_g3[1:]]
 
-            fused_feat = torch.cat(fused_feat_list, dim=0)
+            ego_unified_bev = current_unified_bev[0:1]
+
+            fused_feat = self.std_net(ego_unified_bev, ego_demand, collab_sparse_data, )
 
         return fused_feat, commu_volume, delay_loss, commu_loss
