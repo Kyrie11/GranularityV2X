@@ -65,6 +65,9 @@ class DualGuidanceAttentionFusion(nn.Module):
             self.positional_embedding = nn.Parameter(torch.zeros(1, self.model_dim, H, W, device=device))
 
         encoded_demand = self.demand_encoder(ego_demand)
+        print("ego_features.shape=", ego_features.shape)
+        print("encoded_demand.shape=", encoded_demand.shape)
+        print("self.positional_embedding.shape=", self.positional_embedding.shape)
         query_state = ego_features + encoded_demand + self.positional_embedding
 
         # --- 2. Generate Attention Parameters from Q_i ---
@@ -150,8 +153,7 @@ class DemandDrivenFusionNetwork(nn.Module):
         self.fusion_attention = DualGuidanceAttentionFusion(
             model_dim=g_out,
             num_heads=num_heads,
-            num_sampling_points=num_sampling_points,
-            demand_dim=model_dim
+            num_sampling_points=num_sampling_points
         )
         self.final_layernorm = nn.LayerNorm(model_dim)
         self.refinement_block = nn.Sequential(
