@@ -149,9 +149,9 @@ class AgentEncoder(nn.Module):
 
         #编码非对称上下文
         s_ctx = self.short_term_encoder(short_term_his) #shape : [N,s_ctx_channels,H,W]
-        print("短期上下文的shape是：", s_ctx.shape)
+
         l_ctx = self.long_term_encoder(long_term_his, interval_tensor) #[N, l_ctx_dim]
-        print("长期上下文的shape是：", l_ctx.shape)
+
 
         return {
             "short_term_context": s_ctx,

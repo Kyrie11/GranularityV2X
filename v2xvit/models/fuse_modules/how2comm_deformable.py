@@ -166,6 +166,8 @@ class How2comm(nn.Module):
 
         short_term_context = encoded_contexts['short_term_context'], #短期上下文
         long_term_context = encoded_contexts['long_term_context'],  #长期上下文
+        print("短期上下文的shape是：", short_term_context.shape)
+        print("长期上下文的shape是：", long_term_context.shape)
 
         delayed_g1_frame = short_his_g1[0]  # 要延迟补偿的帧
         delayed_g2_frame = short_his_g2[0]  # 要延迟补偿的帧
@@ -174,8 +176,8 @@ class How2comm(nn.Module):
         delay = delay * 100
         print("延迟时间是:", delay)
         predictions = self.context_extrapolator(
-            s_ctx=encoded_contexts['short_term_context'], #短期上下文
-            l_ctx=encoded_contexts['long_term_context'],  #长期上下文
+            s_ctx=short_term_context, #短期上下文
+            l_ctx=long_term_context,  #长期上下文
             delayed_g1_frame=delayed_g1_frame,
             delayed_g2_frame=delayed_g2_frame,
             delayed_g3_frame=delayed_g3_frame,
@@ -231,8 +233,7 @@ class How2comm(nn.Module):
 
         delay_loss = torch.tensor(0.0, device=device)
         if short_his and long_his:
-            (predicted_g1, predicted_g2, predicted_g3,
-             delay_loss, short_term_ctx, long_term_ctx) = self.delay_compensation(g1_data, g2_data, g3_data,
+            predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(g1_data, g2_data, g3_data,
                                                                             short_his, long_his, delay)
             print(f"predicted_g1.shape={predicted_g1.shape}")
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
