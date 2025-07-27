@@ -66,6 +66,7 @@ class DualGuidanceAttentionFusion(nn.Module):
         print("self.num_points=",self.num_points)
         print("self.num_heads=",self.num_heads)
         print(f"H={H}, W={W}")
+        print(f"(reference_grid + offsets).shape={(reference_grid + offsets).shape}")
         sampling_locations = (reference_grid + offsets).view(1, self.num_heads * H * W, self.num_points, 2)
         sampled_values = []
         for g in range(3):
