@@ -28,7 +28,7 @@ train_params:
   frame: &frame 1 # 这个参数现在可以不用了，但为了兼容性可以保留
   lsh: # Long-Short History Parameters
     m: 0 # Number of long-term frames
-    n: 0 # Number of short-term frames
+    n: 1 # Number of short-term frames
     p: 3 # Period for long-term frames
 
 
