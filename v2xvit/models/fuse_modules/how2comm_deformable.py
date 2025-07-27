@@ -280,7 +280,6 @@ class How2comm(nn.Module):
 
             fused_feat = self.fused_net(ego_unified_bev, ego_demand.clone().detach(),
                                       collab_sparse_data, sparse_mask,
-                                      [self.g1_encoder, self.g2_encoder, self.g3_encoder],
-                                      self.fusion_conv)
+                                      [self.g1_encoder, self.g2_encoder, self.g3_encoder])
 
         return fused_feat, commu_volume, delay_loss, commu_loss
