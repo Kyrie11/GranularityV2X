@@ -76,9 +76,9 @@ class How2comm(nn.Module):
         feature_size = (100, 352)
 
         #============三个粒度数据的编码器================
-        g1_in, g1_out = 8, 16
+        g1_in, g1_out = 8, 256
         g2_in, g2_out = 256, 256
-        g3_in, g3_out = 8, 16
+        g3_in, g3_out = 8, 256
         unified_channel = 256
         total_input = g1_out + g2_out + g3_out
         self.g1_encoder = GranularityEncoder(input_channels=g1_in, output_channels=g1_out)
