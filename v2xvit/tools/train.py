@@ -153,6 +153,7 @@ def main():
                 short_his_data = historical_data[:n]
                 long_his_data = []
                 historical_ego_indices = ego_indices_batch[0]
+                print(f"historical_ego_indices={historical_ego_indices}")
                 if historical_ego_indices.nelement() > 0:
                     # The timeline starts from the most recent historical frame (e.g., t-1)
                     start_index = historical_ego_indices[0].item()
@@ -176,7 +177,7 @@ def main():
             #     # print(f"每个车的延迟分别为{frame_data['ego']['time_delay']}")
             #     # print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
             #     # print(f"  > Agent Timestamps: {agent_ts_list}")
-            print(f"historical_ego_indices={historical_ego_indices}")
+
 
             print("长期历史帧数：", len(long_his_data))
             print("短期历史帧数：", len(short_his_data))
