@@ -150,7 +150,8 @@ class DemandDrivenFusionNetwork(nn.Module):
         self.fusion_attention = DualGuidanceAttentionFusion(
             model_dim=g_out,
             num_heads=num_heads,
-            num_sampling_points=num_sampling_points
+            num_sampling_points=num_sampling_points,
+            demand_dim=model_dim
         )
         self.final_layernorm = nn.LayerNorm(model_dim)
         self.refinement_block = nn.Sequential(
