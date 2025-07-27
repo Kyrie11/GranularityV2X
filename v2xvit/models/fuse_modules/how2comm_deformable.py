@@ -212,9 +212,9 @@ class How2comm(nn.Module):
         g2_data: feature-level data
         g3_data: detection-level data
     '''
-    def forward(self, g1_data, g2_data, g3_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None):
-        device = g2_data.device
-        _, C, H, W = g2_data.shape
+    def forward(self, current_g1_data, current_g2_data, current_g3_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None):
+        device = current_g2_data.device
+        _, C, H, W = current_g2_data.shape
         B, L = pairwise_t_matrix.shape[:2]
 
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
@@ -226,17 +226,19 @@ class How2comm(nn.Module):
         pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1,
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
-        current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
-
         delay_loss = torch.tensor(0.0, device=device)
         if short_his and long_his:
-            predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(g1_data, g2_data, g3_data,
+            predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(current_g1_data, current_g2_data, current_g3_data,
                                                                             short_his, long_his, delay)
             print(f"predicted_g1.shape={predicted_g1.shape}")
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
-            g1_data[1:] = predicted_g1[1:]
-            g2_data[1:] = predicted_g2[1:]
-            g3_data[1:] = predicted_g3[1:]
+            g1_data = current_g1_data.clone().detach()
+            g2_data = current_g2_data.clone().detach()
+            g3_data = current_g3_data.clone().detach()
+
+            g1_data[1:] = predicted_g1[1:].clone().detach()
+            g2_data[1:] = predicted_g2[1:].clone().detach()
+            g3_data[1:] = predicted_g3[1:].clone().detach()
 
             current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
 
@@ -247,7 +249,11 @@ class How2comm(nn.Module):
             #=======对当前帧进行时序增强(只对ego增强了)=========
             ego_enhanced = self.hdae_module(current_unified_bev[0:1], ego_stx, ego_ltx)
             current_unified_bev[0:1] = ego_enhanced
-
+        else:
+            g1_data = current_g1_data
+            g2_data = current_g2_data
+            g3_data = current_g3_data
+            current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
         # #======对数据进行空间增强==============
         # current_unified_bev = self.gain_gated_module(current_unified_bev)
         # #==================================
@@ -268,10 +274,13 @@ class How2comm(nn.Module):
             print("sparse_g1.shape=", sparse_g1.shape)
             print("ego_demand.shape=", ego_demand.shape)
 
-            collab_sparse_data = [sparse_g1[1:], sparse_g2[1:], sparse_g3[1:]]
+            collab_sparse_data = [sparse_g1[1:].clone().detach(), sparse_g2[1:].clone().detach(), sparse_g3[1:].clone().detach()]
 
-            ego_unified_bev = current_unified_bev[0:1]
+            ego_unified_bev = current_unified_bev[0:1].clone().detach()
 
-            fused_feat = self.std_net(ego_unified_bev, ego_demand, collab_sparse_data, sparse_mask, [self.g1_encoder, self.g2_encoder, self.g3_encoder], self.fusion_conv)
+            fused_feat = self.std_net(ego_unified_bev, ego_demand.clone().detach(),
+                                      collab_sparse_data, sparse_mask,
+                                      [self.g1_encoder, self.g2_encoder, self.g3_encoder],
+                                      self.fusion_conv)
 
         return fused_feat, commu_volume, delay_loss, commu_loss

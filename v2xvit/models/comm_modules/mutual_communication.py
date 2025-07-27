@@ -173,10 +173,6 @@ class AdvancedCommunication(nn.Module):
         collab_sparse_g2 = collab_g2 * sparse_maps[:, 1:2, :, :]
         collab_sparse_g3 = collab_g3 * sparse_maps[:, 2:3, :, :]
 
-        print("collab_sparse_g1.shape=",collab_sparse_g1.shape)
-        print("collab_sparse_g2.shape=",collab_sparse_g2.shape)
-        print("collab_sparse_g3.shape=",collab_sparse_g3.shape)
-
         sparse_g1 = torch.cat([ego_g1, collab_sparse_g1], dim=0)
         sparse_g2 = torch.cat([ego_g2, collab_sparse_g2], dim=0)
         sparse_g3 = torch.cat([ego_g3, collab_sparse_g3], dim=0)
