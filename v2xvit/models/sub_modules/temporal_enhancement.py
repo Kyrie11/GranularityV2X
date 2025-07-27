@@ -6,7 +6,6 @@ from typing import Tuple
 class ConvBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, use_relu: bool = True):
         super().__init__()
-        print("convblock里的out_channels:", out_channels)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
         # Using GroupNorm is often more stable for BEV features than BatchNorm,
         # especially with varying or small batch sizes.
@@ -43,11 +42,21 @@ class HistoryContextAdaptiveEnhancement(nn.Module):
 
         # === Step 2: Dual-Pathway Enhancement Layers ===
         # Pathway 1: Content Enhancement. Output channels must match current_channels for addition.
-        print("history_channels=", history_channels)
         self.content_pathway = ConvBlock(history_channels, current_channels)
 
-        # Pathway 2: Attention Modulation. Output is a single-channel map for spatial gating.
-        self.attention_pathway = ConvBlock(history_channels, 1)
+        # Corrected Pathway 2: Attention Modulation.
+        # This pathway is now a dedicated sequence that correctly handles the projection to 1 channel.
+        # We first project to an intermediate channel dim (e.g., history_channels // 4) that IS divisible by 8,
+        # then project to 1 channel with a simple Conv2d without GroupNorm.
+        intermediate_attn_ch = history_channels // 4
+        self.attention_pathway = nn.Sequential(
+            # First projection with a ConvBlock-like structure
+            nn.Conv2d(history_channels, intermediate_attn_ch, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(num_groups=8, num_channels=intermediate_attn_ch),
+            nn.ReLU(inplace=True),
+            #  projection to 1 channel. No GroupNorm here to avoid the error.
+            nn.Conv2d(intermediate_attn_ch, 1, kernel_size=1)
+        )
 
         # === Step 3:  Fusion Layer ===
         # Takes concatenation of original, content-enhanced, and attention-modulated features.
