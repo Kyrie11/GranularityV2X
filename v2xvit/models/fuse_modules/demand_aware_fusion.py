@@ -1,192 +1,250 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+from typing import List
 
-class DemandAwareCrossAttention(nn.Module):
-    def __init__(self, model_dim: int, num_heads: int, demand_dim: int = 3):
-        """
-        Args:
-            model_dim (int): The channel dimension of the unified features (C_UNIFIED).
-            num_heads (int): The number of parallel attention heads (M).
-            demand_dim (int): The channel dimension of the demand map (usually 3).
-        """
+
+# (The DualGuidanceAttentionFusion and _create_grid_normalized helper classes remain exactly the same as before)
+# ... [Paste the DualGuidanceAttentionFusion and _create_grid_normalized classes from the previous response here] ...
+def _create_grid_normalized(H: int, W: int, device: torch.device) -> torch.Tensor:
+    """Creates a normalized 2D grid of reference points in the range [-1, 1]."""
+    y_coords, x_coords = torch.meshgrid(
+        torch.linspace(-1, 1, H, device=device),
+        torch.linspace(-1, 1, W, device=device),
+        indexing='ij'
+    )
+    return torch.stack((x_coords, y_coords), dim=-1)
+
+
+class DualGuidanceAttentionFusion(nn.Module):
+    def __init__(self, model_dim: int, num_heads: int, num_sampling_points: int, demand_dim: int = 3):
         super().__init__()
         assert model_dim % num_heads == 0, "model_dim must be divisible by num_heads"
         self.model_dim = model_dim
         self.num_heads = num_heads
+        self.num_points = num_sampling_points
         self.head_dim = model_dim // num_heads
-
-        # 1. f_enc: Lightweight MLP to encode the demand map
-        # We use a 1x1 Conv to act as a per-pixel MLP
         self.demand_encoder = nn.Sequential(
             nn.Conv2d(demand_dim, self.model_dim // 2, kernel_size=1),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Conv2d(self.model_dim // 2, self.model_dim, kernel_size=1)
         )
-
-        # 2. P_pos: Learnable positional embedding (initialized to zeros)
-        # The network will learn spatial biases during training.
-        # Shape: [1, C_UNIFIED, H, W] - will be dynamically inferred in forward pass
         self.positional_embedding = None
+        num_params_per_point = 2 + 1 + 3
+        self.param_gen_proj = nn.Conv2d(model_dim, self.num_heads * self.num_points * num_params_per_point,
+                                        kernel_size=1)
+        self.value_proj = nn.Conv2d(model_dim, model_dim, kernel_size=1)
+        self.output_proj = nn.Conv2d(model_dim, model_dim, kernel_size=1)
 
-        # 3. Projection matrices W_m^Q, W_m^K, W_m^V
-        # We use a single large Conv2d for efficiency and split the output.
-        self.q_proj = nn.Conv2d(self.model_dim, self.model_dim, kernel_size=1)
-        self.k_proj = nn.Conv2d(self.model_dim, self.model_dim, kernel_size=1)
-        self.v_proj = nn.Conv2d(self.model_dim, self.model_dim, kernel_size=1)
-
-        # 4. W^O: Output projection layer
-        self.output_proj = nn.Conv2d(self.model_dim, self.model_dim, kernel_size=1)
-
-    def forward(self, ego_features, ego_demand, collaborator_features):
-        """
-        Args:
-            ego_features (torch.Tensor): The ego agent's unified feature map (H_hat_i).
-                                         Shape: [1, C_UNIFIED, H, W].
-            ego_demand (torch.Tensor): The ego agent's granular demand map (D_i).
-                                       Shape: [1, 3, H, W].
-            collaborator_features (torch.Tensor): The confidence-aware unified features
-                                                  from all collaborators (H''_j).
-                                                  Shape: [N-1, C_UNIFIED, H, W].
-
-        Returns:
-            torch.Tensor: The aggregated collaborative feature map (H_collab).
-                          Shape: [1, C_UNIFIED, H, W].
-        """
-
-        num_collabs, C, H, W = collaborator_features.shape
-        # Initialize positional embedding if it's the first run
+    def forward(self,
+                ego_features: torch.Tensor,
+                ego_demand: torch.Tensor,
+                collaborator_features_per_granularity: List[torch.Tensor],
+                collaborator_masks: torch.Tensor) -> torch.Tensor:
+        num_collabs, C, H, W = collaborator_features_per_granularity[0].shape
+        device = ego_features.device
         if self.positional_embedding is None:
-            self.positional_embedding = nn.Parameter(torch.zeros(1, C, H, W, device=ego_features.device))
-
-        # --- 1. Formulate the comprehensive Query state H'_i ---
+            self.positional_embedding = nn.Parameter(torch.zeros(1, C, H, W, device=device))
         encoded_demand = self.demand_encoder(ego_demand)
-        # Note: We use simple addition here instead of concatenation + projection
-        # as it is more parameter-efficient and achieves the same goal of conditioning.
-        # H'_i = Concat(H_hat_i, f_enc(D_i)) + P_pos
         query_state = ego_features + encoded_demand + self.positional_embedding
-
-        # --- 2. Project to Q, K, V for all heads ---
-        # Project and then split into M heads.
-        # [B, C, H, W] -> [B, M, C_head, H, W]
-        q = self.q_proj(query_state).view(1, self.num_heads, self.head_dim, H, W)
-        k = self.k_proj(collaborator_features).view(num_collabs, self.num_heads, self.head_dim, H, W)
-        v = self.v_proj(collaborator_features).view(num_collabs, self.num_heads, self.head_dim, H, W)
-
-        # --- 3. Compute Attention Scores and Aggregate Values ---
-        # Scaling factor
-        d_k = self.head_dim
-        scale = math.sqrt(d_k)
-
-        # Expand q for broadcasting over collaborators: [1, 1, M, C_head, H, W]
-        q_expanded = q.unsqueeze(1)
-
-        # Compute scaled dot-product attention scores
-        # Element-wise product and sum over head_dim is equivalent to batched dot-product
-        # (q_expanded * k) -> [1, N-1, M, C_head, H, W]
-        # torch.sum(...) -> [1, N-1, M, H, W]
-        attn_scores = torch.sum(q_expanded * k, dim=3) / scale
-
-        # Softmax over the collaborator dimension (dim=1)
-        attention_weights = F.softmax(attn_scores, dim=1)
-
-        # Weighted sum of values
-        # Unsqueeze weights and v for broadcasting
-        # weights: [1, N-1, M, 1, H, W], v: [1, N-1, M, C_head, H, W]
-        # output:  [1, N-1, M, C_head, H, W]
-        weighted_v = attention_weights.unsqueeze(3) * v.unsqueeze(0)
-
-        # Sum over the collaborator dimension (dim=1) to get head outputs
-        # Shape: [1, M, C_head, H, W]
-        head_outputs = torch.sum(weighted_v, dim=1)
-
-        # --- 4. Concatenate heads and final projection ---
-        # Reshape to [1, M * C_head, H, W] = [1, C_UNIFIED, H, W]
-        concatenated_heads = head_outputs.reshape(1, self.model_dim, H, W)
-
-        #  output projection W^O
+        params = self.param_gen_proj(query_state)
+        params = params.view(1, self.num_heads, -1, H, W)
+        offset_params, spatial_weight_params, granularity_weight_params = torch.split(
+            params, [self.num_points * 2, self.num_points, self.num_points * 3], dim=2)
+        offsets = offset_params.view(1, self.num_heads, self.num_points, 2, H, W).permute(0, 1, 4, 5, 2, 3)
+        offsets = torch.tanh(offsets)
+        spatial_weights = spatial_weight_params.view(1, self.num_heads, self.num_points, H, W).permute(0, 1, 3, 4, 2)
+        spatial_weights = F.softmax(spatial_weights, dim=-1)
+        granularity_weights = granularity_weight_params.view(1, self.num_heads, self.num_points, 3, H, W).permute(0, 1,
+                                                                                                                  4, 5,
+                                                                                                                  2, 3)
+        granularity_weights = F.softmax(granularity_weights, dim=-1)
+        values_per_granularity = [self.value_proj(feat) for feat in collaborator_features_per_granularity]
+        reference_grid = _create_grid_normalized(H, W, device).view(1, 1, H, W, 1, 2)
+        sampling_locations = (reference_grid + offsets).view(1, self.num_heads * H * W, self.num_points, 2)
+        sampled_values = []
+        for g in range(3):
+            val_g = values_per_granularity[g]
+            sampled_val = F.grid_sample(
+                val_g,
+                sampling_locations.expand(num_collabs, -1, -1, -1),
+                mode='bilinear', padding_mode='zeros', align_corners=False
+            )
+            sampled_values.append(sampled_val)
+        sampled_values = torch.stack(sampled_values, dim=0)
+        gran_weights_bc = granularity_weights.permute(5, 0, 1, 2, 3, 4).reshape(3, 1, self.num_heads, H * W,
+                                                                                self.num_points)
+        gran_weights_bc = gran_weights_bc.permute(0, 1, 3, 4, 2).reshape(3, 1, self.head_dim, self.num_heads * H * W,
+                                                                         self.num_points)
+        fused_collab_values = torch.sum(sampled_values * gran_weights_bc, dim=0)
+        unified_mask = collaborator_masks.sum(dim=1, keepdim=True) > 0
+        sampled_mask = F.grid_sample(
+            unified_mask.float(),
+            sampling_locations.expand(num_collabs, -1, -1, -1),
+            mode='nearest', padding_mode='zeros', align_corners=False
+        )
+        summed_fused_values = (fused_collab_values * sampled_mask).sum(dim=0)
+        num_agents_per_point = sampled_mask.sum(dim=0).clamp(min=1e-6)
+        aggregated_value = summed_fused_values / num_agents_per_point
+        spatial_weights_bc = spatial_weights.view(1, self.num_heads * H * W, self.num_points).expand(self.model_dim, -1,
+                                                                                                     -1)
+        head_outputs = torch.sum(aggregated_value * spatial_weights_bc, dim=-1)
+        head_outputs = head_outputs.view(self.num_heads, self.head_dim, H, W)
+        concatenated_heads = head_outputs.permute(1, 0, 2, 3).reshape(1, self.model_dim, H, W)
         H_collab = self.output_proj(concatenated_heads)
-
         return H_collab
 
-class STDNet(nn.Module):
+
+class DemandDrivenFusionNetwork(nn.Module):
     """
-    Implements the full Spatio-Temporal and Demand-Aware Fusion Network.
+    Orchestrates the entire demand-driven fusion process.
     """
 
-    def __init__(self, model_dim: int, num_heads: int):
+    def __init__(self, model_dim: int, num_heads: int, num_sampling_points: int):
         super().__init__()
-        self.fusion_attention = DemandAwareCrossAttention(model_dim=model_dim, num_heads=num_heads)
-        #  LayerNorm for the residual connection
+        self.fusion_attention = DualGuidanceAttentionFusion(
+            model_dim=model_dim,
+            num_heads=num_heads,
+            num_sampling_points=num_sampling_points
+        )
         self.final_layernorm = nn.LayerNorm(model_dim)
+        self.refinement_block = nn.Sequential(
+            nn.Conv2d(model_dim, model_dim * 2, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(model_dim * 2, model_dim, kernel_size=1, bias=False)
+        )
 
-    def forward(self, ego_features, ego_demand, collaborator_features_list, collaborator_masks, encoders, fusion_conv):
-        """
-        Args:
-            ego_features (torch.Tensor): Ego agent's enhanced feature map (H_hat_i).
-                                         You mentioned this is already implemented.
-                                         Shape: [1, C_UNIFIED, H, W].
-            ego_demand (torch.Tensor): Ego agent's demand map.
-                                       Shape: [1, 3, H, W].
-            collaborator_features_list (list[torch.Tensor]): List of sparse features.
-                - [features_g1, features_g2, features_g3]
-                - Each tensor is shape [N-1, C_g, H, W].
-            collaborator_masks (torch.Tensor): Mask indicating data presence.
-                                               Shape: [N-1, 3, H, W].
+    def forward(self,
+                ego_features: torch.Tensor,
+                ego_demand: torch.Tensor,
+                collaborator_features: List[torch.Tensor],
+                collaborator_masks: torch.Tensor,
+                encoders: List[nn.Module]) -> torch.Tensor:
+        # === Stage 1: Confidence-Aware Feature Encoding for Collaborators ===
+        encoded_features_per_granularity = []
+        for g_idx in range(3):
+            encoded_g = encoders[g_idx](collaborator_features[g_idx])
+            encoded_features_per_granularity.append(encoded_g)
 
-        Returns:
-            torch.Tensor: The final, enhanced ego-agent feature map.
-                          Shape: [1, C_UNIFIED, H, W].
-        """
-        # --- Stage 1: Confidence-Aware Feature Encoding ---
         modulated_features_per_granularity = []
+        for g_idx in range(3):
+            encoded_g = encoded_features_per_granularity[g_idx]
+            mask_g = collaborator_masks[:, g_idx:g_idx + 1]
+            summed_features = (encoded_g * mask_g).sum(dim=0)
+            num_agents = mask_g.sum(dim=0).clamp(min=1e-6)
+            consensus_map_g = summed_features / num_agents
+            similarity = F.cosine_similarity(encoded_g, consensus_map_g.unsqueeze(0), dim=1)
+            confidence_g = 0.5 * (1 + similarity.unsqueeze(1))
+            modulated_g = encoded_g * confidence_g * mask_g
+            modulated_features_per_granularity.append(modulated_g)
 
-        for g_idx in range(3):  # Iterate over 3 granularities
-            features_g = collaborator_features_list[g_idx]  # [N-1, C_g, H, W]
-            encoder_g = encoders[g_idx]
-            # Mask for current granularity, unsqueezed for broadcasting
-            # Shape: [N-1, 1, H, W]
-            mask_g = collaborator_masks[:, g_idx:g_idx + 1, :, :]
-            # Encode features: Epsilon_g(F''_j,g)
-            encoded_features = encoder_g(features_g)  # [N-1, C_ENCODED, H, W]
-
-            # Only consider non-zero data for consensus
-            encoded_features_masked = encoded_features * mask_g
-
-            # Compute Consensus Map C_g
-            # Sum features and masks across the collaborator dimension (dim=0)
-            summed_features = encoded_features_masked.sum(dim=0)  # [C_ENCODED, H, W]
-            num_agents_per_pixel = mask_g.sum(dim=0).clamp(min=1e-8)  # [1, H, W]
-            consensus_map_g = summed_features / num_agents_per_pixel  # [C_ENCODED, H, W]
-
-            # Compute Confidence Score E_j,g using cosine similarity
-            # F.cosine_similarity needs tensors of same shape or broadcastable
-            # It computes similarity along dim=1 (channels) by default
-            similarity = F.cosine_similarity(encoded_features, consensus_map_g.unsqueeze(0), dim=1)
-            # Add a dimension for channel-wise multiplication: [N-1, H, W] -> [N-1, 1, H, W]
-            confidence_score_g = 0.5 * (1 + similarity.unsqueeze(1))
-
-            # Modulate features with confidence
-            # Only apply confidence where data exists (important for sparsity)
-            modulated_features = encoded_features * confidence_score_g * mask_g
-            modulated_features_per_granularity.append(modulated_features)
-        # Concatenate modulated granularities along the channel dimension
-        concatenated_modulated = torch.cat(modulated_features_per_granularity, dim=1)
-
-        # Unify to create H''_j
-        H_j_prime_prime = fusion_conv(concatenated_modulated)  # [N-1, C_UNIFIED, H, W]
-
-        # --- Stage 2: Demand-Driven Multi-Head Attention Fusion ---
+        # === Stage 2: Dual-Guidance Attention Fusion ===
         H_collab = self.fusion_attention(
             ego_features=ego_features,
             ego_demand=ego_demand,
-            collaborator_features=H_j_prime_prime
+            collaborator_features_per_granularity=modulated_features_per_granularity,
+            collaborator_masks=collaborator_masks
         )
 
-        # ---  Residual Connection ---
-        # LayerNorm expects [B, C, H, W] -> [B, H, W, C] -> norm -> [B, C, H, W]
+        # === Stage 3: Residual Fusion and Refinement ===
         normed_collab = self.final_layernorm(H_collab.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
-        H_final = ego_features + normed_collab
+        H_fused = ego_features + normed_collab
+        H_refined = H_fused + self.refinement_block(H_fused)
+        return H_refined
 
-        return H_final
+
+class DetectionDecoder(nn.Module):
+    """
+    A simple decoder to generate detection predictions from the final feature map.
+    """
+
+    def __init__(self, in_channels: int, num_classes: int, num_regression_params: int):
+        super().__init__()
+        self.classification_head = nn.Conv2d(in_channels, num_classes, kernel_size=1)
+        self.regression_head = nn.Conv2d(in_channels, num_regression_params, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> (torch.Tensor, torch.Tensor):
+        class_preds = self.classification_head(x)
+        reg_preds = self.regression_head(x)
+        return class_preds, reg_preds
+
+
+# --- Example Usage ---
+if __name__ == '__main__':
+    # --- Model Parameters ---
+    C_H = 256  # Dimension of the final unified feature H_i
+    C_ENCODED = 128  # The output dimension of each granularity encoder
+    C_V, C_F, C_R = 64, 128, 32  # Input channels for the 3 raw granularities
+    H, W = 128, 128
+    N = 5  # Total agents (1 ego + 4 collaborators)
+    NUM_HEADS = 8
+    NUM_SAMPLING_POINTS = 4
+    NUM_CLASSES = 5
+    NUM_REG_PARAMS = 8  # (dx, dy, dz, log(w), log(l), log(h), sin(a), cos(a))
+
+    # --- Reusable Modules (as they would be in a real model) ---
+    g1_encoder = nn.Conv2d(C_V, C_ENCODED, kernel_size=1)
+    g2_encoder = nn.Conv2d(C_F, C_ENCODED, kernel_size=1)
+    g3_encoder = nn.Conv2d(C_R, C_ENCODED, kernel_size=1)
+    encoders_list = [g1_encoder, g2_encoder, g3_encoder]
+
+    # This is the fusion_conv you asked about. It unifies the encoded granularities.
+    fusion_conv = nn.Conv2d(C_ENCODED * 3, C_H, kernel_size=1)
+
+    # --- 1. Simulate EGO-AGENT feature generation (Upstream Process) ---
+    ego_raw_F_V = torch.randn(1, C_V, H, W)
+    ego_raw_F_F = torch.randn(1, C_F, H, W)
+    ego_raw_F_R = torch.randn(1, C_R, H, W)
+
+    ego_enc_V = g1_encoder(ego_raw_F_V)
+    ego_enc_F = g2_encoder(ego_raw_F_F)
+    ego_enc_R = g3_encoder(ego_raw_F_R)
+
+    ego_concatenated = torch.cat([ego_enc_V, ego_enc_F, ego_enc_R], dim=1)
+    H_i = fusion_conv(ego_concatenated)  # This is the final input for our fusion network
+
+    # --- 2. Prepare Inputs for the Fusion Network ---
+    ego_demand_input = torch.rand(1, 3, H, W)
+    collab_F_V = torch.randn(N - 1, C_V, H, W)
+    collab_F_F = torch.randn(N - 1, C_F, H, W)
+    collab_F_R = torch.randn(N - 1, C_R, H, W)
+    collab_features_raw = [collab_F_V, collab_F_F, collab_F_R]
+
+    raw_masks = torch.randn(N - 1, 3, H, W)
+    mask_indices = torch.argmax(torch.cat([torch.zeros(N - 1, 1, H, W), raw_masks], dim=1), dim=1)
+    collab_masks_input = F.one_hot(mask_indices, num_classes=4)[:, :, :, 1:].permute(0, 3, 1, 2).float()
+
+    # --- 3. Instantiate and run the Fusion Network ---
+    fusion_network = DemandDrivenFusionNetwork(
+        model_dim=C_H,
+        num_heads=NUM_HEADS,
+        num_sampling_points=NUM_SAMPLING_POINTS
+    )
+
+    H_refined_output = fusion_network(
+        ego_features=H_i,
+        ego_demand=ego_demand_input,
+        collaborator_features=collab_features_raw,
+        collaborator_masks=collab_masks_input,
+        encoders=encoders_list
+    )
+
+    # --- 4. Pass the refined feature map to the Decoder ---
+    decoder = DetectionDecoder(
+        in_channels=C_H,
+        num_classes=NUM_CLASSES,
+        num_regression_params=NUM_REG_PARAMS
+    )
+
+    class_predictions, reg_predictions = decoder(H_refined_output)
+
+    print("--- Full Pipeline Simulation ---")
+    print(f"Ego Feature (H_i) Shape:           {H_i.shape}")
+    print(f"Refined Feature (H_refined) Shape: {H_refined_output.shape}")
+    print(f"Classification Output Shape:       {class_predictions.shape}")
+    print(f"Regression Output Shape:           {reg_predictions.shape}")
+
+    assert H_refined_output.shape == H_i.shape
+    assert class_predictions.shape == (1, NUM_CLASSES, H, W)
+    assert reg_predictions.shape == (1, NUM_REG_PARAMS, H, W)
+    print("\n✅ Full pipeline executed successfully. All shapes are correct.")

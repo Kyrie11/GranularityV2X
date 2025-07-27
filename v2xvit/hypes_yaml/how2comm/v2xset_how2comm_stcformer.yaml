@@ -2,8 +2,8 @@ name: v2xset_how2comm_stcformer_opv2v
 # root_dir: '/data/v2xset/train'
 # validate_dir: '/data/v2xset/validate'
 
-root_dir: '/home/ysz/dataset/opv2v/train'
-validate_dir: '/home/ysz/dataset/opv2v/train'
+root_dir: '/home/wang/code/dataset/opv2v/train'
+validate_dir: '/home/wang/code/dataset/opv2v/train'
 
 wild_setting:
   async: true #为true时开启延迟模式

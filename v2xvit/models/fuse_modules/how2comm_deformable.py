@@ -14,7 +14,7 @@ from v2xvit.models.sub_modules.hpc import ContextExtrapolator, AgentEncoder
 from v2xvit.models.sub_modules.temporal_enhancement import HistoryContextAdaptiveEnhancement
 from v2xvit.models.sub_modules.gain_gated_modulation import GainGatedModulation
 from v2xvit.loss.distillation_loss import DistillationLoss
-from v2xvit.models.fuse_modules.demand_aware_fusion import STDNet
+from v2xvit.models.fuse_modules.demand_aware_fusion import DemandDrivenFusionNetwork
 
 
 class GranularityEncoder(nn.Module):
@@ -106,7 +106,7 @@ class How2comm(nn.Module):
 
         self.gain_gated_module = GainGatedModulation(channels=unified_channel)
 
-        self.std_net = STDNet(model_dim=256, num_heads=4)
+        self.fused_net = DemandDrivenFusionNetwork(model_dim=256, num_heads=4, num_sampling_points=8)
 
     def regroup(self, x, record_len):
         cum_sum_len = torch.cumsum(record_len, dim=0)
@@ -278,7 +278,7 @@ class How2comm(nn.Module):
 
             ego_unified_bev = current_unified_bev[0:1].clone().detach()
 
-            fused_feat = self.std_net(ego_unified_bev, ego_demand.clone().detach(),
+            fused_feat = self.fused_net(ego_unified_bev, ego_demand.clone().detach(),
                                       collab_sparse_data, sparse_mask,
                                       [self.g1_encoder, self.g2_encoder, self.g3_encoder],
                                       self.fusion_conv)

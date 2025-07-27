@@ -54,6 +54,9 @@ class PointPillarHow2comm(nn.Module):
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
 
+        self.classification_head = nn.Conv2d(128 * 2, args['anchor_number'], kernel_size=1)
+        self.regression_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'], kernel_size=1)
+
         self.avg_pool = nn.AvgPool2d(kernel_size=2, stride=2)
 
         if args['backbone_fix']:
@@ -124,9 +127,6 @@ class PointPillarHow2comm(nn.Module):
 
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
-        print(f"long_his_g1[0].shape={long_his_g1[0].shape}")
-        print(f"long_his_g2[0].shape={long_his_g2[0].shape}")
-        print(f"long_his_g3[0].shape={long_his_g3[0].shape}")
 
         short_his = [short_his_g1, short_his_g2, short_his_g3]
         long_his = [long_his_g1, long_his_g2, long_his_g3]
@@ -141,11 +141,11 @@ class PointPillarHow2comm(nn.Module):
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)
 
-        psm = self.cls_head(fused_feature)
-        rm = self.reg_head(fused_feature)
+        #============使用另外的decoder来预测(防止复用)=============
+        psm = self.classification_head(fused_feature)
+        rm = self.regression_head(fused_feature)
         output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
-        return None
 
 
     def get_histroy_granularity(self, history):
