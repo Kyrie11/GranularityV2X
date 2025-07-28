@@ -104,8 +104,14 @@ class PointPillarHow2comm(nn.Module):
     # g2的shape是[N,C,H,W]
     # g1的shape是[N,C',H/2,W/2]
     # 我们只加载一个batch数据，所以不再使用record_len
-    def forward(self, current_data, short_term, long_term):
+    def forward(self, m,n,p,batch_data_list,ego_indices_batch):
+
+        short_term, long_term = self.get_long_short_his(m,n,p,batch_data_list,ego_indices_batch)
+
+        GT_data = batch_data_list[0]
+        current_data = batch_data_list[1] #可能是延迟，也可能是不延迟的数据
         #===========current时刻的数据================
+        GT_g_data = self.get_histroy_granularity([GT_data])
         #返回的是三个元素个数为1的列表
         g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
         # 从列表中分离
@@ -116,16 +122,11 @@ class PointPillarHow2comm(nn.Module):
         delay = current_data_dict['time_delay']
         print(f"所有agent的延时为:{delay}")
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
-        print(f"pairwise_t_matrix.shape={pairwise_t_matrix.shape}")
         record_len = current_data_dict['record_len'][0] #只有一个batch
         print(f"g1_data.shape={g1_data.shape}")
         print(f"g2_data.shape={g2_data.shape}")
         print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
-
-        print(f"delay={delay}")
-        print(f"delay.shape={delay.shape}")
-        print(f"delay.type={type(delay)}")
 
         short_his_g1, short_his_g2, short_his_g3 = self.get_histroy_granularity(short_term)
         long_his_g1, long_his_g2, long_his_g3 = self.get_histroy_granularity(long_term)
@@ -133,12 +134,13 @@ class PointPillarHow2comm(nn.Module):
         short_his = [short_his_g1, short_his_g2, short_his_g3]
         long_his = [long_his_g1, long_his_g2, long_his_g3]
 
-        if len(long_term) <= 1:
+
+        if len(short_term) > 1 and len(long_term) > 1:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
+                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, short_his=short_his, long_his=long_his, GT_data=GT_g_data)
         else:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, short_his=short_his, long_his=long_his)
+                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
         print("fused_feat_list.shape=",fused_feature.shape)
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)
@@ -149,6 +151,45 @@ class PointPillarHow2comm(nn.Module):
         output_dict = {'psm':psm, 'rm':rm, 'commu_loss':commu_loss, 'offset_loss':offset_loss, 'commu_volume':commu_volume}
         return output_dict
 
+    def get_long_short_his(self, m, n, p, batch_data_list, ego_indices_batch):
+        print(f"一共有{len(batch_data_list)}帧")
+        print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
+        print(f"各个agent的延时为：{batch_data_list[1]['ego']['time_delay']}")
+        print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
+        print(f"各个agent的GT时间为：{batch_data_list[1]['ego']['agent_timestamps']}")
+        if m != 0 and n != 0:
+            historical_data = batch_data_list[1:]
+            short_his_data = historical_data[:n]
+            long_his_data = []
+            historical_ego_indices = ego_indices_batch[0]
+            print(f"historical_ego_indices={historical_ego_indices}")
+
+            if historical_ego_indices.nelement() > 0:
+                # The timeline starts from the most recent historical frame (e.g., t-1)
+                start_index = historical_ego_indices[0].item()
+                target_long_indices = [start_index - j * p for j in range(m)]
+
+                for target_idx in target_long_indices:
+                    # Find the position of target_idx in the historical timeline
+                    match_pos = (historical_ego_indices == target_idx).nonzero(as_tuple=True)[0]
+                    if match_pos.nelement() > 0:
+                        # We found it, now grab the corresponding data snapshot
+                        # The index `frame_index` corresponds to the `historical_data` list
+                        frame_index = match_pos.item()
+                        long_his_data.append(historical_data[frame_index])
+            print("短期历史时间帧检查")
+            for i in range(len(short_his_data)):
+                print(f"第{i + 1}帧短期帧：", short_his_data[i]['ego']['agent_timestamps'])
+            print("长期历史时间帧检查")
+            for i in range(len(long_his_data)):
+                print(f"第{i + 1}帧长期帧：", long_his_data[i]['ego']['agent_timestamps'])
+
+
+        else:
+            short_his_data = []
+            long_his_data = []
+
+        return short_his_data, long_his_data
 
     def get_histroy_granularity(self, history):
         his_g1, his_g2, his_g3 = [], [], []

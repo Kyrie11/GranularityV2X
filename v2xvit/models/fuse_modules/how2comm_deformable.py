@@ -120,11 +120,11 @@ class How2comm(nn.Module):
         unified_feature = self.fusion_conv(concatenated_features)
         return unified_feature
 
-    def delay_compensation(self, g1_data, g2_data, g3_data, short_his, long_his, delay):
+    def delay_compensation(self, g1_data, g2_data, g3_data, GT_data, short_his, long_his, delay):
         short_his_g1, short_his_g2, short_his_g3 = short_his
         long_his_g1, long_his_g2, long_his_g3 = long_his
+        GT_g1_data, GT_g2_data, GT_g3_data = GT_data #用来作为监督
 
-        print(f"g1_data.shape={g1_data.shape}")
         # =======短期历史数据编码=======
         short_his_g1_stacked = torch.stack(short_his_g1, dim=1)  # [N,T,C,H,W]
         short_his_g2_stacked = torch.stack(short_his_g2, dim=1)
@@ -165,9 +165,9 @@ class How2comm(nn.Module):
         print("短期上下文的shape是：", short_term_context.shape)
         print("长期上下文的shape是：", long_term_context.shape)
 
-        delayed_g1_frame = short_his_g1[0]  # 要延迟补偿的帧
-        delayed_g2_frame = short_his_g2[0]  # 要延迟补偿的帧
-        delayed_g3_frame = short_his_g3[0]  # 要延迟补偿的帧
+        delayed_g1_frame = g1_data  # 要延迟补偿的帧
+        delayed_g2_frame = g2_data  # 要延迟补偿的帧
+        delayed_g3_frame = g3_data  # 要延迟补偿的帧
         # =================得到预测结果，包含预测的g1、g2、g3===============
         delay = delay * 100
         print("延迟时间是:", delay)
@@ -189,11 +189,11 @@ class How2comm(nn.Module):
         # 将余弦相似度转换为损失。
         # 损失值范围为 [0, 2]，目标是最小化到 0。
         # 我们计算批次中所有像素位置损失的平均值。
-        cos_sim1 = F.cosine_similarity(predicted_g1, g1_data, dim=1)
+        cos_sim1 = F.cosine_similarity(predicted_g1, GT_g1_data, dim=1)
         cos_sim1 = (1 - cos_sim1).mean()
-        cos_sim2 = F.cosine_similarity(predicted_g2, g2_data, dim=1)
+        cos_sim2 = F.cosine_similarity(predicted_g2, GT_g2_data, dim=1)
         cos_sim2 = (1 - cos_sim2).mean()
-        cos_sim3 = F.cosine_similarity(predicted_g3, g3_data, dim=1)
+        cos_sim3 = F.cosine_similarity(predicted_g3, GT_g3_data, dim=1)
         cos_sim3 = (1 - cos_sim3).mean()
         delay_loss = cos_sim1 + cos_sim2 + cos_sim3
         return predicted_g1, predicted_g2, predicted_g3, delay_loss, short_term_context, long_term_context
@@ -211,7 +211,8 @@ class How2comm(nn.Module):
         g2_data: feature-level data
         g3_data: detection-level data
     '''
-    def forward(self, current_g1_data, current_g2_data, current_g3_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None):
+    def forward(self, current_g_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None, GT_data=None):
+        current_g1_data, current_g2_data, current_g3_data = current_g_data
         device = current_g2_data.device
         _, C, H, W = current_g2_data.shape
         B, L = pairwise_t_matrix.shape[:2]
@@ -226,18 +227,21 @@ class How2comm(nn.Module):
         2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
         delay_loss = torch.tensor(0.0, device=device)
-        if short_his != None and long_his != None and len(short_his) > 1 and len(long_his) > 1:
-            predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(current_g1_data, current_g2_data, current_g3_data,
-                                                                            short_his, long_his, delay)
+        if len(short_his) > 1 and len(long_his) > 1:
+            predicted_g1, predicted_g2, predicted_g3,delay_loss, short_term_ctx, long_term_ctx = self.delay_compensation(current_g1_data,
+                                                                                                                         current_g2_data,
+                                                                                                                         current_g3_data,
+                                                                                                                         GT_data,
+                                                                                                                         short_his, long_his, delay)
             print(f"predicted_g1.shape={predicted_g1.shape}")
             # =====把预测的数据作为当前时刻的数据，但是要注意ego-agent的数据
-            g1_data = current_g1_data.clone().detach()
-            g2_data = current_g2_data.clone().detach()
-            g3_data = current_g3_data.clone().detach()
+            g1_data = predicted_g1.clone().detach()
+            g2_data = predicted_g2.clone().detach()
+            g3_data = predicted_g3.clone().detach()
 
-            g1_data[1:] = predicted_g1[1:].clone().detach()
-            g2_data[1:] = predicted_g2[1:].clone().detach()
-            g3_data[1:] = predicted_g3[1:].clone().detach()
+            g1_data[0:1] = current_g1_data[0:1]
+            g2_data[0:1] = current_g2_data[0:1]
+            g3_data[0:1] = current_g3_data[0:1]
 
             current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
 

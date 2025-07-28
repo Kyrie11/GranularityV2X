@@ -143,83 +143,31 @@ def main():
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
-
-
-
-            print(f"一共有{len(batch_data_list)}帧")
-            print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
-            print(f"各个agent的延时为：{batch_data_list[1]['ego']['time_delay']}")
-            print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
-            print(f"各个agent的GT时间为：{batch_data_list[1]['ego']['agent_timestamps']}")
-            if m != 0 and n != 0:
-                historical_data = batch_data_list[1:]
-                short_his_data = historical_data[:n]
-                long_his_data = []
-                historical_ego_indices = ego_indices_batch[0]
-                print(f"historical_ego_indices={historical_ego_indices}")
-
-                if historical_ego_indices.nelement() > 0:
-                    # The timeline starts from the most recent historical frame (e.g., t-1)
-                    start_index = historical_ego_indices[0].item()
-                    target_long_indices = [start_index - j * p for j in range(m)]
-
-                    for target_idx in target_long_indices:
-                        # Find the position of target_idx in the historical timeline
-                        match_pos = (historical_ego_indices == target_idx).nonzero(as_tuple=True)[0]
-                        if match_pos.nelement() > 0:
-                            # We found it, now grab the corresponding data snapshot
-                            # The index `frame_index` corresponds to the `historical_data` list
-                            frame_index = match_pos.item()
-                            long_his_data.append(historical_data[frame_index])
-                print("短期历史时间帧检查")
-                for i in range(len(short_his_data)):
-                    print(f"第{i+1}帧短期帧：", short_his_data[i]['ego']['agent_timestamps'])
-                print("长期历史时间帧检查")
-                for i in range(len(long_his_data)):
-                    print(f"第{i + 1}帧长期帧：", long_his_data[i]['ego']['agent_timestamps'])
-
-
-            else:
-                short_his_data = []
-                long_his_data = []
-                batch_data_list = [batch_data_list[1]] #如果m或者n其中一个为0另一个为1，那么加载相同的两帧，第二帧的数据有delay
-
             batch_data_list = train_utils.to_device(batch_data_list, device)
-            # for j, frame_data in enumerate(historical_data):
-            #     # The ego timestamp for this frame is the j-th element in the historical index list
-            #     ego_ts_for_frame = historical_ego_indices[j].item()
-            #     agent_ts_list = frame_data['ego']['agent_timestamps']
-            #     # print(f"每个车的延迟分别为{frame_data['ego']['time_delay']}")
-            #     # print(f"\n[Frame {j + 1} - Historical (Ego-time: {ego_ts_for_frame})]:")
-            #     # print(f"  > Agent Timestamps: {agent_ts_list}")
+                # batch_data_list = [batch_data_list[1]] #如果m或者n其中一个为0,我们就不进行延时补偿，取第二个数据作为GT(可能延时后的数据)
 
-
-            print("长期历史帧数：", len(long_his_data))
-            print("短期历史帧数：", len(short_his_data))
-            current_data = batch_data_list[0]
+            GT_data = batch_data_list[0]
             # the model will be evaluation mode during validation
             model.train()
             model.zero_grad()
             optimizer.zero_grad()
 
-            print(f"len(short_his_data)={len(short_his_data)}")
-            print(f"len(long_his_data)={len(long_his_data)}")
             # case1 : late fusion train --> only ego needed
             # case2 : early fusion train --> all data projected to ego
             # case3 : intermediate fusion --> ['ego']['processed_lidar']
             # becomes a list, which containing all data from other cavs
             # as well
             if not opt.half:
-                ouput_dict = model(current_data, short_his_data, long_his_data)
+                ouput_dict = model(m,n,p,batch_data_list,ego_indices_batch)
                 final_loss = criterion(ouput_dict,
-                                       current_data['ego']['label_dict'])
+                                       GT_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
-                ouput_dict = model(current_data, short_his_data, long_his_data)
+                ouput_dict = model(m,n,p,batch_data_list,ego_indices_batch)
                 # first argument is always your output dictionary,
                 # second argument is always your label dictionary.
                 final_loss = criterion(ouput_dict,
-                                    current_data['ego']['label_dict'])
+                                    GT_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)
