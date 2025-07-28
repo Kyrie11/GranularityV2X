@@ -150,6 +150,7 @@ def main():
             print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
             print(f"各个agent的延时为：{batch_data_list[1]['ego']['time_delay']}")
             print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
+            print(f"各个agent的GT时间为：{batch_data_list[1]['ego']['agent_timestamps']}")
             if m != 0 and n != 0:
                 historical_data = batch_data_list[1:]
                 short_his_data = historical_data[:n]
