@@ -6,7 +6,7 @@ root_dir: '/home/wang/code/dataset/opv2v/train'
 validate_dir: '/home/wang/code/dataset/opv2v/train'
 
 wild_setting:
-  async: true #为true时开启延迟模式
+  async: false #为true时开启延迟模式
   async_mode: real #real表示开启真实值随机模拟，sim表示固定延迟
   async_overhead: 600 #单位为ms
   seed: 20
