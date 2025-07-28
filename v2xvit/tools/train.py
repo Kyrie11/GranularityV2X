@@ -144,13 +144,13 @@ def main():
             if batch_data_list is None:
                 continue
 
-            batch_data_list = train_utils.to_device(batch_data_list, device)
+
 
             print(f"一共有{len(batch_data_list)}帧")
             print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
             print(f"各个agent的延时为：{batch_data_list[1]['ego']['time_delay']}")
             print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
-            if len(batch_data_list) > 1:
+            if m != 0 and n != 0:
                 historical_data = batch_data_list[1:]
                 short_his_data = historical_data[:n]
                 long_his_data = []
@@ -181,6 +181,9 @@ def main():
             else:
                 short_his_data = []
                 long_his_data = []
+                batch_data_list = [batch_data_list[1]] #如果m或者n其中一个为0另一个为1，那么加载相同的两帧，第二帧的数据有delay
+
+            batch_data_list = train_utils.to_device(batch_data_list, device)
             # for j, frame_data in enumerate(historical_data):
             #     # The ego timestamp for this frame is the j-th element in the historical index list
             #     ego_ts_for_frame = historical_ego_indices[j].item()
