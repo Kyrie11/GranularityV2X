@@ -113,6 +113,8 @@ class PointPillarHow2comm(nn.Module):
         g2_data = g2_data[0]
         g3_data = g3_data[0]
         current_data_dict = current_data['ego']
+        delay = current_data_dict['time_delay']
+        print(f"所有agent的延时为:{delay}")
         pairwise_t_matrix = current_data_dict['pairwise_t_matrix'].clone().detach()
         print(f"pairwise_t_matrix.shape={pairwise_t_matrix.shape}")
         record_len = current_data_dict['record_len'][0] #只有一个batch
@@ -120,7 +122,7 @@ class PointPillarHow2comm(nn.Module):
         print(f"g2_data.shape={g2_data.shape}")
         print(f"g3_data.shape={g3_data.shape}")
         #所有agent的延迟时间
-        delay = short_term[0]['ego']['time_delay'][:record_len]
+
         print(f"delay={delay}")
         print(f"delay.shape={delay.shape}")
         print(f"delay.type={type(delay)}")
