@@ -214,7 +214,7 @@ class How2comm(nn.Module):
     def forward(self, current_g_data, record_len, pairwise_t_matrix, backbone=None, delay=0, short_his=None, long_his=None, GT_data=None):
         current_g1_data, current_g2_data, current_g3_data = current_g_data
         device = current_g2_data.device
-        _, C, H, W = current_g2_data.shape
+        _, _, H, W = current_g2_data.shape
         B, L = pairwise_t_matrix.shape[:2]
 
         pairwise_t_matrix = pairwise_t_matrix[:, :, :, [
@@ -243,20 +243,19 @@ class How2comm(nn.Module):
             g2_data[0:1] = current_g2_data[0:1]
             g3_data[0:1] = current_g3_data[0:1]
 
-            current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
+            ego_unified_bev = self.get_unified_bev(g1_data[0:1], g2_data[0:1], g3_data[0:1])
 
             ego_stx = short_term_ctx[0:1]
             ego_ltx = long_term_ctx[0:1]
             print("长期上下文ego_ltx的shape:", ego_ltx.shape)
             print("短期上下文ego_stx的shape:", ego_stx.shape)
             #=======对当前帧进行时序增强(只对ego增强了)=========
-            ego_enhanced = self.hdae_module(current_unified_bev[0:1], ego_stx, ego_ltx)
-            current_unified_bev[0:1] = ego_enhanced
+            ego_enhanced = self.hdae_module(ego_unified_bev, ego_stx, ego_ltx)
+
         else:
             g1_data = current_g1_data
             g2_data = current_g2_data
             g3_data = current_g3_data
-            current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
         # #======对数据进行空间增强==============
         # current_unified_bev = self.gain_gated_module(current_unified_bev)
         # #==================================
@@ -267,6 +266,10 @@ class How2comm(nn.Module):
         g1_data = warp_affine_simple(g1_data, t_matrix[0, :, :, :], (H,W))
         g2_data = warp_affine_simple(g2_data, t_matrix[0, :, :, :], (H,W))
         g3_data = warp_affine_simple(g3_data, t_matrix[0, :, :, :], (H,W))
+
+        current_unified_bev = self.get_unified_bev(g1_data, g2_data, g3_data)
+        if len(short_his) > 1 and len(long_his) > 1:
+            current_unified_bev[0:1] = ego_enhanced
 
         if self.communication:
             #sparse_mask[N-1,3,H,W}

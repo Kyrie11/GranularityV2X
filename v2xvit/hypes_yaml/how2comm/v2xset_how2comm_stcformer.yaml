@@ -2,8 +2,8 @@ name: v2xset_how2comm_stcformer_opv2v
 # root_dir: '/data/v2xset/train'
 # validate_dir: '/data/v2xset/validate'
 
-root_dir: '/home/wang/code/dataset/opv2v/train'
-validate_dir: '/home/wang/code/dataset/opv2v/train'
+root_dir: '/root/autodl-fs/opv2v/train'
+validate_dir: '/root/autodl-fs/opv2v/train'
 
 wild_setting:
   async: true #为true时开启延迟模式
@@ -27,8 +27,8 @@ train_params:
   max_cav: &max_cav 5
   frame: &frame 1 # 这个参数现在可以不用了，但为了兼容性可以保留
   lsh: # Long-Short History Parameters
-    m: 0 # Number of long-term frames
-    n: 1 # Number of short-term frames
+    m: 3 # Number of long-term frames
+    n: 3 # Number of short-term frames
     p: 5 # Period for long-term frames
 
 
