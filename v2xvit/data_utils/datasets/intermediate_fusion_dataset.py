@@ -157,10 +157,10 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
 
         anchor_box = self.post_processor.generate_anchor_box()
         label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center, anchors=anchor_box, mask=mask)
-        velocity += (self.max_cav - len(velocity)) * [0.]
-        time_delay += (self.max_cav - len(time_delay)) * [0.]
-        infra += (self.max_cav - len(infra)) * [0.]
-        agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0.]
+        # velocity += (self.max_cav - len(velocity)) * [0.]
+        # time_delay += (self.max_cav - len(time_delay)) * [0.]
+        # infra += (self.max_cav - len(infra)) * [0.]
+        # agent_timestamps += (self.max_cav - len(agent_timestamps)) * [0.]
         spatial_correction_matrix = np.stack(spatial_correction_matrix)
         padding_eye = np.tile(np.eye(4)[None], (self.max_cav - len(spatial_correction_matrix), 1, 1))
         spatial_correction_matrix = np.concatenate([spatial_correction_matrix, padding_eye], axis=0)
