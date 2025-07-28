@@ -145,8 +145,9 @@ def main():
                 continue
 
             batch_data_list = train_utils.to_device(batch_data_list, device)
-            print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
+
             print(f"一共有{len(batch_data_list)}帧")
+            print(f"一共有{batch_data_list[0]['ego']['record_len']}辆车")
             print(f"各个agent的延时为：{batch_data_list[1]['ego']['time_delay']}")
             print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
             if len(batch_data_list) > 1:
