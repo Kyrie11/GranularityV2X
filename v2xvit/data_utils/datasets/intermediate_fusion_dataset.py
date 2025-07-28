@@ -39,12 +39,10 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         n = self.params['train_params']['lsh']['n']
         p = self.params['train_params']['lsh']['p']
 
-        # 2. Generate the "Ground Truth" frame for t=0 (no delay)
-        gt_base_data_dict, _, current_timestamp = self.retrieve_base_data(idx, cur_ego_pose_flag=True)
-
+        gt_base_data_dict, _, _ = self.retrieve_base_data(idx, cur_ego_pose_flag=True, ignore_delay=True)
         # 3. Generate the realistic, delayed historical frames
         historical_base_data_list, agent_delays, ego_historical_indices = \
-            self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=False)
+            self.retrieve_lsh_data(idx, m, n, p, cur_ego_pose_flag=True)
 
         # If, for some reason, the retrieval fails (e.g., idx at the very beginning of the dataset)
         if not historical_base_data_list:
@@ -56,7 +54,6 @@ class IntermediateFusionDataset(basedataset.BaseDataset):
         # This will be our final list of all processed frames.
         final_processed_list = []
         # 4. Combine them: GT frame at index 0, history starts at index 1
-        base_data_list = [gt_base_data_dict] + historical_base_data_list
 
         # 3. ## CONSTRUCT THE GROUND TRUTH FRAME ##
         # We use the data for t_0 (the first item in our retrieved list) as the base.

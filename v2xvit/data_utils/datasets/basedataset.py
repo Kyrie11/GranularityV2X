@@ -210,7 +210,7 @@ class BaseDataset(Dataset):
 
 
 
-    def retrieve_base_data(self, idx, cur_ego_pose_flag=True):
+    def retrieve_base_data(self, idx, cur_ego_pose_flag=True, ignore_delay=False):
         """
         Given the index, return the corresponding data.
 
@@ -250,10 +250,12 @@ class BaseDataset(Dataset):
         for cav_id, cav_content in scenario_database.items():
             data[cav_id] = OrderedDict()
             data[cav_id]['ego'] = cav_content['ego']
-
-            # calculate delay for this vehicle
-            timestamp_delay = \
-                self.time_delay_calculation(cav_content['ego'])
+            if ignore_delay:
+                timestamp_delay = 0
+            else:
+                # calculate delay for this vehicle
+                timestamp_delay = \
+                    self.time_delay_calculation(cav_content['ego'])
 
             if timestamp_index - timestamp_delay <= 0:
                 timestamp_delay = timestamp_index

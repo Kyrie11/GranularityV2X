@@ -39,7 +39,8 @@ class DualGuidanceAttentionFusion(nn.Module):
 
         # === FIX 1 (continued): `value_proj` now correctly maps from `collaborator_dim` to `model_dim` ===
         self.value_proj = nn.Conv2d(collaborator_dim, model_dim, kernel_size=1)
-        self.output_proj = nn.Conv2d(model_dim, model_dim, kernel_size=1)
+        # self.output_proj = nn.Conv2d(model_dim, model_dim, kernel_size=1)
+        self.output_proj = nn.Conv2d(model_dim * self.num_heads, model_dim, kernel_size=1)
 
     def forward(self,
                 ego_features: torch.Tensor,
@@ -145,11 +146,11 @@ class DualGuidanceAttentionFusion(nn.Module):
         # --- 5. Output Projection ---
         # Reshape from [C, M*H*W] to [C, M, H, W] to separate head outputs
         head_outputs_spatial = head_outputs.view(self.model_dim, self.num_heads, H, W)
-
+        permuted_heads = head_outputs_spatial.permute(1, 0, 2, 3)
         # Sum across the heads dimension, and add back the batch dimension
-        aggregated_heads = head_outputs_spatial.sum(dim=1).unsqueeze(0)  # -> [1, C, H, W]
-
-        H_collab = self.output_proj(aggregated_heads)
+        # aggregated_heads = head_outputs_spatial.sum(dim=1).unsqueeze(0)  # -> [1, C, H, W]
+        concatenated_heads = permuted_heads.contiguous().view(1, self.num_heads * self.model_dim, H, W)
+        H_collab = self.output_proj(concatenated_heads)
 
         return H_collab
 

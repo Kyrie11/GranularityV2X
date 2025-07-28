@@ -140,7 +140,6 @@ def main():
             sampler_train.set_epoch(epoch)
 
         pbar2 = tqdm.tqdm(total=len(train_loader), leave=True)
-        record_len_list = []
         for i, (batch_data_list, ego_indices_batch) in enumerate(train_loader):
             if batch_data_list is None:
                 continue
@@ -148,12 +147,15 @@ def main():
             batch_data_list = train_utils.to_device(batch_data_list, device)
 
             print(f"一共有{len(batch_data_list)}帧")
+            print(f"各个agent的延时为：{batch_data_list[0]['ego']['time_delay']}")
+            print(f"各个agent的GT时间为：{batch_data_list[0]['ego']['agent_timestamps']}")
             if len(batch_data_list) > 1:
                 historical_data = batch_data_list[1:]
                 short_his_data = historical_data[:n]
                 long_his_data = []
                 historical_ego_indices = ego_indices_batch[0]
                 print(f"historical_ego_indices={historical_ego_indices}")
+
                 if historical_ego_indices.nelement() > 0:
                     # The timeline starts from the most recent historical frame (e.g., t-1)
                     start_index = historical_ego_indices[0].item()
@@ -167,6 +169,14 @@ def main():
                             # The index `frame_index` corresponds to the `historical_data` list
                             frame_index = match_pos.item()
                             long_his_data.append(historical_data[frame_index])
+                print("短期历史时间帧检查")
+                for i in range(len(short_his_data)):
+                    print(f"第{i+1}帧短期帧：", short_his_data[i]['ego']['agent_timestamps'])
+                print("长期历史时间帧检查")
+                for i in range(len(long_his_data)):
+                    print(f"第{i + 1}帧长期帧：", long_his_data[i]['ego']['agent_timestamps'])
+
+
             else:
                 short_his_data = []
                 long_his_data = []
@@ -200,13 +210,12 @@ def main():
                                        current_data['ego']['label_dict'])
                 final_loss += ouput_dict["offset_loss"] + ouput_dict["commu_loss"]
             else:
-                with torch.cuda.amp.autocast():
-                    ouput_dict = model(current_data, short_his_data, long_his_data)
-                    # first argument is always your output dictionary,
-                    # second argument is always your label dictionary.
-                    final_loss = criterion(ouput_dict,
-                                        current_data['ego']['label_dict'])
-                    final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
+                ouput_dict = model(current_data, short_his_data, long_his_data)
+                # first argument is always your output dictionary,
+                # second argument is always your label dictionary.
+                final_loss = criterion(ouput_dict,
+                                    current_data['ego']['label_dict'])
+                final_loss += ouput_dict["offset_loss"]+ ouput_dict["commu_loss"]
             criterion.logging(epoch, i, len(train_loader), writer)
             pbar2.update(1)
             time.sleep(0.001)
@@ -215,8 +224,9 @@ def main():
                 final_loss.backward()
                 optimizer.step()
             else:
-                final_loss.backward()
-                optimizer.step()
+                scaler.scale(final_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
         if epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model.state_dict(),
                        os.path.join(saved_path,

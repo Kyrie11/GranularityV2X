@@ -64,15 +64,10 @@ class How2comm(nn.Module):
         self.discrete_ratio = args['voxel_size'][0]
         # self.long_intervals = args['train_params']['lsh']['p']
         self.long_intervals = 3
-        # 通信模块
-        self.communication_net = AdvancedCommunication(c_vox=10, c_feat=64, c_det=16)
+
 
         s_ctx_channels = 32
         l_ctx_dim = 256
-        physical_info_channels = 8
-        bev_feature_channels = 256
-        result_map_channels = 8
-        total_input_channels=physical_info_channels + bev_feature_channels + result_map_channels
         feature_size = (100, 352)
 
         #============三个粒度数据的编码器================
@@ -88,10 +83,13 @@ class How2comm(nn.Module):
         self.fusion_conv = nn.Conv2d(total_input, unified_channel, kernel_size=1)
         #============三个粒度数据的编码器================
 
+        # 通信模块
+        self.communication_net = AdvancedCommunication(c_g1=g1_in, c_g2=g2_in, c_g3=g3_in)
+
         #============时延预测模块============
         self.context_extrapolator = ContextExtrapolator(s_ctx_channels=s_ctx_channels, l_ctx_dim=l_ctx_dim, fusion_dim=128,
-                                                        bev_feature_channels=bev_feature_channels, physical_info_channels=physical_info_channels,
-                                                        result_map_channels=result_map_channels, feature_size=feature_size)
+                                                        bev_feature_channels=g2_in, physical_info_channels=g1_in,
+                                                        result_map_channels=g3_in, feature_size=feature_size)
         #============时延预测模块============
         self.temporal_context_encoder = AgentEncoder(total_input_channels=unified_channel,
                                                                s_ctx_channels=s_ctx_channels,
@@ -259,7 +257,7 @@ class How2comm(nn.Module):
         # current_unified_bev = self.gain_gated_module(current_unified_bev)
         # #==================================
         
-        #坐标对齐
+        #坐标对齐1
         t_matrix = pairwise_t_matrix[0][:record_len, :record_len, :, :]
         H, W = g1_data.shape[2:]
         g1_data = warp_affine_simple(g1_data, t_matrix[0, :, :, :], (H,W))

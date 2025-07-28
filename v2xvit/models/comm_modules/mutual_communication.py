@@ -139,12 +139,12 @@ class TransmissionSparsificationModule(nn.Module):
 #  传输模块(Main)
 # ===================================================================
 class AdvancedCommunication(nn.Module):
-    def __init__(self, c_vox, c_feat, c_det, c_semantic=32, lambda_rec=0.5):
+    def __init__(self, c_g1, c_g2, c_g3, lambda_rec=0.5):
         super(AdvancedCommunication, self).__init__()
         # self.channel_request = Channel_Request_Attention(in_planes)
 
         # 注册成本向量为buffer
-        self.register_buffer('cost_vector', torch.tensor([c_vox, c_feat, c_det], dtype=torch.float32))
+        self.register_buffer('cost_vector', torch.tensor([c_g1, c_g2, c_g3], dtype=torch.float32))
 
         # --- NEW: Hyperparameter to balance the losses ---
         self.lambda_rec = lambda_rec
@@ -157,7 +157,7 @@ class AdvancedCommunication(nn.Module):
         self.gcm = GranularityConfidenceModule(unified_bev_channels=256)
         self.umm = UtilityMatchingModule()
 
-        cost_list = [8,256,8]
+        cost_list = [c_g1, c_g2, c_g3]
         self.selection_net = TransmissionSparsificationModule(cost_list, self.alpha, self.thre)
 
     def get_sparse_data(self, g1_data, g2_data, g3_data, sparse_maps):
