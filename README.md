@@ -1,10 +1,10 @@
-# How2comm: Communication-Efficient and Collaboration-Pragmatic Multi-Agent Perception
+# ChrousNet
 
 The official repository of the NeurIPS2023 paper:
 
 ![teaser](image.png)
 
-> [**How2comm: Communication-Efficient and Collaboration-Pragmatic Multi-Agent Perception**](https://openreview.net/pdf?id=Dbaxm9ujq6)        
+> [**ChrousNet*]     
 >  Dingkang Yang\*, Kun Yang\*, Yuzheng Wang, Jing Liu, Zhi Xu, Rongbin Yin, Peng Zhai, Lihua Zhang <br>
 
 
