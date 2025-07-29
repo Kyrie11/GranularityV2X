@@ -111,7 +111,11 @@ class PointPillarHow2comm(nn.Module):
         GT_data = batch_data_list[0]
         current_data = batch_data_list[1] #可能是延迟，也可能是不延迟的数据
         #===========current时刻的数据================
-        GT_g_data = self.get_histroy_granularity([GT_data])
+        GT_g1_data, GT_g2_data, GT_g3_data = self.get_histroy_granularity([GT_data])
+        GT_g1_data = GT_g1_data[0]
+        GT_g2_data = GT_g2_data[0]
+        GT_g3_data = GT_g3_data[0]
+        GT_g_data = [GT_g1_data, GT_g2_data, GT_g3_data]
         #返回的是三个元素个数为1的列表
         g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
 
