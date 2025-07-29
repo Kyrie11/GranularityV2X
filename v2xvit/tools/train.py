@@ -82,8 +82,8 @@ def main():
 
     print('---------------Creating Model------------------')
     model = train_utils.create_model(hypes)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # device = torch.device("cpu")
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cpu")
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir

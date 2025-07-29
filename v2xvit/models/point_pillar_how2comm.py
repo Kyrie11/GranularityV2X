@@ -114,11 +114,12 @@ class PointPillarHow2comm(nn.Module):
         GT_g_data = self.get_histroy_granularity([GT_data])
         #返回的是三个元素个数为1的列表
         g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
-        current_g_data = [g1_data, g2_data, g3_data]
+
         # 从列表中分离
         g1_data = g1_data[0]
         g2_data = g2_data[0]
         g3_data = g3_data[0]
+        current_g_data = [g1_data, g2_data, g3_data]
         current_data_dict = current_data['ego']
         delay = current_data_dict['time_delay']
         print(f"所有agent的延时为:{delay}")
