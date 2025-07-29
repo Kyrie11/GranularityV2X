@@ -1,11 +1,10 @@
 # ChrousNet
 
-The official repository of the NeurIPS2023 paper:
 
 ![teaser](image.png)
 
 > [**ChrousNet*]     
->  Dingkang Yang\*, Kun Yang\*, Yuzheng Wang, Jing Liu, Zhi Xu, Rongbin Yin, Peng Zhai, Lihua Zhang <br>
+>  Yu Senze <br>
 
 
 
