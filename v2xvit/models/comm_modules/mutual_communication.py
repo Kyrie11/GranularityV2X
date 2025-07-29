@@ -151,7 +151,7 @@ class AdvancedCommunication(nn.Module):
         # Using L1 Loss is often better for image-to-image tasks as it's less blurry
         self.reconstruction_loss_fn = nn.L1Loss()
 
-        self.thre = 0.1 #高于阈值时才传输
+        self.thre = 0.6 #高于阈值时才传输
         self.alpha = [0.1, 0.2, 0.1] #调制粒度损失的参数
 
         self.gcm = GranularityConfidenceModule(unified_bev_channels=256)

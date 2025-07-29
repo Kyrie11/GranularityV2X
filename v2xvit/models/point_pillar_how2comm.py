@@ -114,6 +114,7 @@ class PointPillarHow2comm(nn.Module):
         GT_g_data = self.get_histroy_granularity([GT_data])
         #返回的是三个元素个数为1的列表
         g1_data, g2_data, g3_data = self.get_histroy_granularity([current_data])
+        current_g_data = [g1_data, g2_data, g3_data]
         # 从列表中分离
         g1_data = g1_data[0]
         g2_data = g2_data[0]
@@ -137,10 +138,10 @@ class PointPillarHow2comm(nn.Module):
 
         if len(short_term) > 1 and len(long_term) > 1:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, short_his=short_his, long_his=long_his, GT_data=GT_g_data)
+                current_g_data=current_g_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone, delay=delay, short_his=short_his, long_his=long_his, GT_data=GT_g_data)
         else:
             fused_feature, commu_volume, offset_loss, commu_loss = self.fusion_net(
-                current_g1_data=g1_data, current_g2_data=g2_data, current_g3_data=g3_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
+                current_g_data=current_g_data, record_len=record_len, pairwise_t_matrix=pairwise_t_matrix, backbone=self.backbone)
         print("fused_feat_list.shape=",fused_feature.shape)
         # if self.shrink_flag:
         #     fused_feature = self.shrink_conv(fused_feature)
